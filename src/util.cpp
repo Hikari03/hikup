@@ -5,15 +5,13 @@
 #include "CommandType.cpp"
 #include "Color.cpp"
 
-
-
 /**
  * @brief Resolves the path to a file handle
  *
  * @param path
  * @return input file stream of the resolved path and its size
  */
-std::pair<std::ifstream, size_t> resolveFile ( const std::string& path ) {
+inline std::pair<std::ifstream, std::ifstream::pos_type> resolveFile ( const std::string& path ) {
 	std::filesystem::path _path = std::filesystem::absolute(path); // Resolves the absolute path of the input file
 
 	if ( is_directory(_path) )
@@ -28,23 +26,23 @@ std::pair<std::ifstream, size_t> resolveFile ( const std::string& path ) {
 		throw std::runtime_error("Could not open file");
 
 	file.seekg(0, std::ios::end);
-	size_t size = file.tellg();
+	auto size = file.tellg();
 
 	file.seekg(0, std::ios::beg);
 
 	return {std::move(file), std::move(size)};
 }
 
-CommandType resolveCommand ( const std::string& command ) {
+inline Command::Type resolveCommand ( const std::string& command ) {
 	if ( command == "up" )
-		return CommandType::UPLOAD;
+		return Command::Type::UPLOAD;
 	if ( command == "down" )
-		return CommandType::DOWNLOAD;
+		return Command::Type::DOWNLOAD;
 
 	throw std::runtime_error("Invalid command: " + command);
 }
 
-std::string colorize(const std::string & text, Color color) {
+inline std::string colorize(const std::string & text, Color color) {
 
 	switch ( color ) {
 		case Color::RED:
@@ -65,4 +63,22 @@ std::string colorize(const std::string & text, Color color) {
 		default:
 			return text;
 	}
+}
+
+inline std::string humanReadableSize( std::ifstream::pos_type size ) {
+
+	const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+	auto sizeDouble = static_cast<double>(size);
+	int unitIndex = 0;
+
+	// Calculate the appropriate unit
+	while (sizeDouble >= 1000.0 && unitIndex < std::size(units) - 1) {
+		sizeDouble /= 1000.0;
+		unitIndex++;
+	}
+
+	// Format the size to 2 decimal places and append unit
+	std::ostringstream oss;
+	oss << std::fixed << std::setprecision(2) << sizeDouble << " " << units[unitIndex];
+	return oss.str();
 }
