@@ -52,13 +52,16 @@ inline std::string colorize(const std::string & text, Color color) {
 			return "\033[38;5;47m" + text + "\033[0m";
 
 		case Color::BLUE:
-			return "\033[38;5;27m" + text + "\033[0m";
+			return "\033[38;5;75m" + text + "\033[0m";
 
 		case Color::PURPLE:
-			return "\033[38;5;165m" + text + "\033[0m";
+			return "\033[38;5;141m" + text + "\033[0m";
 
 		case Color::CYAN:
 			return "\033[38;5;45m" + text + "\033[0m";
+
+		case Color::LL_BLUE:
+			return "\033[38;5;153m" + text + "\033[0m";
 
 		default:
 			return text;
