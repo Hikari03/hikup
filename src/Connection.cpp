@@ -1,5 +1,7 @@
 #include "Connection.h"
 
+#include <iostream>
+
 Connection::Connection () {
 #ifdef __linux__
 	_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -45,6 +47,8 @@ void Connection::connectToServer ( std::string ip, int port ) {
 	if ( connect(_socket, (struct sockaddr*)&_server, sizeof( _server )) < 0 ) {
 		throw std::runtime_error("Could not connect to server");
 	}
+
+	receive(); // encryption initialization
 
 
 #elif _WIN32
@@ -93,7 +97,12 @@ void Connection::send ( const std::string& message ) {
 	if ( _encrypted )
 		_secretSeal(messageToSend);
 
+	if (messageToSend.size() % 2 != 0)
+		throw std::runtime_error("Invalid message to send");
+
 	messageToSend += _end;
+
+	//std::cout << "\nSEND | " << messageToSend << std::endl;
 
 	_send(messageToSend.c_str(), messageToSend.size());
 }
@@ -199,7 +208,7 @@ std::string Connection::receiveInternal () {
 }
 
 std::string Connection::receiveData () {
-	auto message = receive();
+	const auto message = receive();
 
 	if ( !message.contains(_data) )
 		throw std::runtime_error("Invalid message received");

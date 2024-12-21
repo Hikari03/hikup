@@ -5,7 +5,7 @@
 
 void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection ) {
 	// we will send the file in chunks of 128KB
-	constexpr size_t chunkSize = 128 * 1000;
+	constexpr size_t chunkSize = 1000;
 	std::vector<char> buffer(chunkSize);
 
 	const unsigned long long totalChunks = fileSize / chunkSize + 1;
@@ -26,9 +26,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 		auto startUploadTime = std::chrono::high_resolution_clock::now();
 
-
 		connection.send(std::string(buffer.data(), chunkSize));
-
 
 		auto endUploadTime = std::chrono::high_resolution_clock::now();
 
@@ -45,6 +43,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 	}
 
 	file.read(buffer.data(), static_cast<std::streamsize>(lastChunkSize));
+	connection.send(std::string(buffer.data(), static_cast<std::streamsize>(lastChunkSize)));
 	std::cout << "\r" << colorize("Sending chunk ", Color::BLUE) + colorize(std::to_string(totalChunks), Color::CYAN) +
 			colorize("/", Color::BLUE) + colorize(std::to_string(totalChunks), Color::CYAN) + colorize(
 				" (100 %)  ", Color::PURPLE) << std::endl;
@@ -123,15 +122,17 @@ int main ( int argc, char* argv[] ) {
 	}
 
 
-	connection.sendInternal("size:" + std::to_string(fileSize));
 	connection.sendInternal("command:" + Command::toString(command));
-	if ( command == Command::Type::UPLOAD ) { connection.sendInternal("filename:" + fileName); }
+	if ( command == Command::Type::UPLOAD ) {
+		connection.sendInternal("size:" + std::to_string(fileSize));
+		connection.sendInternal("filename:" + fileName);
+	}
 	else if ( command == Command::Type::DOWNLOAD ) {
 		fileName = argv[2];
 		connection.sendInternal("hash:" + fileName);
 	}
 
-	if ( connection.receive() != "OK" ) {
+	if ( connection.receiveInternal() != "OK" ) {
 		std::cerr << colorize("Server did not accept the request - ", Color::RED) << std::endl;
 		if ( command == Command::Type::UPLOAD ) {
 			std::cout << colorize("File already exists", Color::RED) << std::endl;
