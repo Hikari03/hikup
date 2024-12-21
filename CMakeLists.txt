@@ -13,7 +13,16 @@ add_executable(hikup src/main.cpp
         src/CommandType.cpp
         src/Color.cpp)
 
-add_executable(hikup-server server/main.cpp)
+add_executable(hikup-server server/main.cpp
+        server/terminal.cpp
+        server/accepter.cpp
+        server/ClientInfo.cpp
+        server/ClientInfo.h
+        server/ConnectionServer.cpp
+        server/ConnectionServer.h)
 
 target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hikup ${LIBSODIUM_LIBRARIES})
+
+target_include_directories(hikup-server PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
+target_link_libraries(hikup-server ${LIBSODIUM_LIBRARIES})
