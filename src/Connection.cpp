@@ -190,9 +190,9 @@ std::string Connection::receive () {
 }
 
 std::string Connection::receiveInternal () {
-	auto message = receive();
+	const auto message = receive();
 
-	if (!message.contains(_internal))
+	if ( !message.contains(_internal) )
 		throw std::runtime_error("Invalid message received");
 
 	return message.substr(strlen(_internal));
@@ -201,7 +201,7 @@ std::string Connection::receiveInternal () {
 std::string Connection::receiveData () {
 	auto message = receive();
 
-	if (!message.contains(_data))
+	if ( !message.contains(_data) )
 		throw std::runtime_error("Invalid message received");
 
 	return message.substr(strlen(_data));
