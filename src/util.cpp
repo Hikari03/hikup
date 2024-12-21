@@ -11,14 +11,14 @@
  * @param path
  * @return input file stream of the resolved path and its size
  */
-inline std::pair<std::ifstream, std::ifstream::pos_type> resolveFile ( const std::string& path ) {
+inline std::tuple<std::ifstream, std::ifstream::pos_type, std::string> resolveFile ( const std::string& path ) {
 	std::filesystem::path _path = std::filesystem::absolute(path); // Resolves the absolute path of the input file
 
 	if ( is_directory(_path) )
 		throw std::runtime_error("File is a directory");
 
 	if ( !is_regular_file(_path) )
-		throw std::runtime_error("File is not regular");
+		throw std::runtime_error("File is not regular/does not exist");
 
 	std::ifstream file(_path, std::ios::binary);
 
@@ -30,7 +30,7 @@ inline std::pair<std::ifstream, std::ifstream::pos_type> resolveFile ( const std
 
 	file.seekg(0, std::ios::beg);
 
-	return {std::move(file), std::move(size)};
+	return {std::move(file), size, _path.filename()};
 }
 
 inline Command::Type resolveCommand ( const std::string& command ) {
@@ -83,5 +83,21 @@ inline std::string humanReadableSize( std::ifstream::pos_type size ) {
 	// Format the size to 2 decimal places and append unit
 	std::ostringstream oss;
 	oss << std::fixed << std::setprecision(2) << sizeDouble << " " << units[unitIndex];
+	return oss.str();
+}
+
+inline std::string humanReadableSpeed( double speed ) {
+	const char* units[] = {"B/s", "KB/s", "MB/s", "GB/s", "TB/s"};
+	int unitIndex = 0;
+
+	// Calculate the appropriate unit
+	while (speed >= 1000.0 && unitIndex < std::size(units) - 1) {
+		speed /= 1000.0;
+		unitIndex++;
+	}
+
+	// Format the speed to 2 decimal places and append unit
+	std::ostringstream oss;
+	oss << std::fixed << std::setprecision(2) << speed << " " << units[unitIndex];
 	return oss.str();
 }
