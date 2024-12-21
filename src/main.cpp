@@ -13,6 +13,10 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 	double readSpeed = 0.0, uploadSpeed = 0.0;
 
+	std::cout << colorize("Starting upload of size: ", Color::BLUE) <<
+			colorize(humanReadableSize(fileSize), Color::CYAN) << "\n" <<
+			std::endl;
+
 	for ( unsigned long long i = 0; i < totalChunks - 1; ++i ) {
 		auto startReadTime = std::chrono::high_resolution_clock::now();
 		file.read(buffer.data(), chunkSize);
@@ -24,7 +28,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		auto startUploadTime = std::chrono::high_resolution_clock::now();
 
 		/*try {
-			connection.send(std::string(buffer.data(), chunkSize));
+			connection.send(std::string(buffer.data(), chunkSize)); TODO
 		}
 		catch ( std::runtime_error& e ) {
 			std::cerr << colorize("ERROR: ", Color::RED) + colorize(e.what(), Color::RED) << std::endl;
@@ -39,10 +43,9 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		std::cout << "\r" << colorize("Sending chunk ", Color::BLUE) + colorize(std::to_string(i + 1), Color::CYAN) +
 				colorize("/", Color::BLUE) + colorize(std::to_string(totalChunks + 1), Color::CYAN) + colorize(
 					std::string(" (") +
-					std::to_string(( static_cast<double>(i) / static_cast<double>(totalChunks) ) * 100.0).substr(0, 5) +
+					std::to_string(( static_cast<double>(i+1) / static_cast<double>(totalChunks) ) * 100.0).substr(0, 5) +
 					" %)", Color::PURPLE) + " ┃ " + colorize("Read: " + humanReadableSpeed(readSpeed), Color::LL_BLUE) +
-				" ━━ " + colorize("up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
-
+				" ━━ " + colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
 	}
 
 	file.read(buffer.data(), static_cast<std::streamsize>(lastChunkSize));
@@ -51,8 +54,49 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 				" (100 %)  ", Color::PURPLE) << std::endl;
 }
 
-void downloadFile (Connection& connection) {
-	
+void downloadFile ( Connection& connection ) {
+	// get total chunks
+	/* auto totalChunks = std::stoll(connection.receiveInternal());
+	auto fileSize = std::stoll(connection.receiveInternal()); TODO
+	auto fileName = connection.receiveInternal();*/
+
+	// test values TODO
+	std::string fileName = "test.txt";
+	unsigned long long fileSize = 4000;
+	unsigned long long totalChunks = 1000;
+
+	std::cout << colorize("Downloading file: ", Color::BLUE) + colorize(fileName, Color::CYAN) << colorize(
+		" of size: ", Color::BLUE) << colorize(humanReadableSize(fileSize), Color::CYAN) << std::endl;
+
+	// create file
+	std::ofstream file(fileName, std::ios::binary);
+
+	for ( unsigned long long i = 0; i < totalChunks; ++i ) {
+		auto startDownloadTime = std::chrono::high_resolution_clock::now();
+		//auto chunk = connection.receiveData(); TODO
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		std::string chunk = "test";
+		auto endDownloadTime = std::chrono::high_resolution_clock::now();
+
+		// calculate download speed
+		std::chrono::duration<double> duration = endDownloadTime - startDownloadTime;
+		auto downloadSpeed = static_cast<double>(chunk.size()) / duration.count();
+
+		auto writeStart = std::chrono::high_resolution_clock::now();
+		//file.write(chunk.c_str(), static_cast<long>(chunk.size())); TODO
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		auto writeEnd = std::chrono::high_resolution_clock::now();
+
+		duration = writeEnd - writeStart;
+		auto writeSpeed = static_cast<double>(chunk.size()) / duration.count();
+
+		std::cout << "\r" << colorize("Sending chunk ", Color::BLUE) + colorize(std::to_string(i + 1), Color::CYAN) +
+				colorize("/", Color::BLUE) + colorize(std::to_string(totalChunks), Color::CYAN) + colorize(
+					std::string(" (") +
+					std::to_string(( static_cast<double>(i+1) / static_cast<double>(totalChunks) ) * 100.0).substr(0, 5) +
+					" %)", Color::PURPLE) + " ┃ " + colorize("Write: " + humanReadableSpeed(writeSpeed), Color::LL_BLUE) +
+				" ━━ " + colorize("Down: " + humanReadableSpeed(downloadSpeed), Color::GREEN) + "  " << std::flush;
+	}
 }
 
 int main ( int argc, char* argv[] ) {
@@ -71,13 +115,13 @@ int main ( int argc, char* argv[] ) {
 
 	try {
 		command = resolveCommand(argv[1]);
-		if (command == Command::Type::UPLOAD) {
+		if ( command == Command::Type::UPLOAD ) {
 			auto [_file, _fileSize, _fileName] = resolveFile(argv[2]);
 			file = std::move(_file);
 			fileSize = _fileSize;
 			fileName = _fileName;
 		}
-		//connection.connectToServer(argv[3], 6998);
+		//connection.connectToServer(argv[3], 6998); TODO
 		std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
 	}
 	catch ( std::runtime_error& e ) {
@@ -86,12 +130,12 @@ int main ( int argc, char* argv[] ) {
 	}
 
 
-	//connection.sendInternal("size:" + std::to_string(fileSize));
+	//connection.sendInternal("size:" + std::to_string(fileSize)); TODO
 	//connection.sendInternal("command:" + Command::toString(command));
-	if (command == Command::Type::UPLOAD) {
+	if ( command == Command::Type::UPLOAD ) {
 		//connection.sendInternal("filename:" + fileName);
 	}
-	else if (command == Command::Type::DOWNLOAD) {
+	else if ( command == Command::Type::DOWNLOAD ) {
 		fileName = argv[2];
 		//connection.sendInternal("hash:" + fileName);
 	}
@@ -99,7 +143,7 @@ int main ( int argc, char* argv[] ) {
 	/*if (connection.receive() != "OK") {
 		std::cerr << colorize("Server did not accept the request - ", Color::RED) << std::endl;
 		if (command == Command::Type::UPLOAD) {
-			std::cout << colorize("File already exists", Color::RED) << std::endl;
+			std::cout << colorize("File already exists", Color::RED) << std::endl; TODO
 		}
 		else {
 			std::cout << colorize("File does not exist", Color::RED) << std::endl;
@@ -107,16 +151,12 @@ int main ( int argc, char* argv[] ) {
 		return 1;
 	}*/
 
-	std::cout << colorize("Server ready!\n", Color::GREEN) + colorize("Starting upload of size: ", Color::BLUE) +
-			colorize(humanReadableSize(fileSize), Color::CYAN) + colorize("\n\n━━━━━━━━━━━━━━━━━━━━━\n", Color::RED) <<
-			std::endl;
+	std::cout << colorize("Server ready!\n", Color::GREEN) << std::endl;
 
-	if (command == Command::Type::UPLOAD) {
+	if ( command == Command::Type::UPLOAD )
 		sendFile(file, fileSize, connection);
-	}
-	else if (command == Command::Type::DOWNLOAD) {
-		//downloadFile(file, fileSize, connection);
-	}
+	else if ( command == Command::Type::DOWNLOAD )
+		downloadFile(connection);
 
 	return 0;
 }

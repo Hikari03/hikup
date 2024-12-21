@@ -98,7 +98,7 @@ void Connection::send ( const std::string& message ) {
 	_send(messageToSend.c_str(), messageToSend.size());
 }
 
-void Connection::sendMessage ( const std::string& message ) { send(_text + message); }
+void Connection::sendData ( const std::string& message ) { send(_data + message); }
 
 void Connection::sendInternal ( const std::string& message ) { send(_internal + message); }
 
@@ -187,6 +187,24 @@ std::string Connection::receive () {
 	}
 
 	return message;
+}
+
+std::string Connection::receiveInternal () {
+	auto message = receive();
+
+	if (!message.contains(_internal))
+		throw std::runtime_error("Invalid message received");
+
+	return message.substr(strlen(_internal));
+}
+
+std::string Connection::receiveData () {
+	auto message = receive();
+
+	if (!message.contains(_data))
+		throw std::runtime_error("Invalid message received");
+
+	return message.substr(strlen(_data));
 }
 
 void Connection::close () {

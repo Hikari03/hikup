@@ -26,7 +26,7 @@
 
 #define _end "::--///-$$$"
 #define _internal "INTERNAL::"
-#define _text "MESSAGE::"
+#define _data "DATA::"
 
 #ifdef HIKUP_DEBUG
 #define DEBUG 1
@@ -50,12 +50,15 @@ public:
 
 	void send ( const std::string& message );
 
-	void sendMessage ( const std::string& message );
+	void sendData ( const std::string& message );
 
 	void sendInternal ( const std::string& message );
 
-
 	std::string receive ();
+
+	std::string receiveInternal ();
+
+	std::string receiveData ();
 
 	void close ();
 
