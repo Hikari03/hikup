@@ -19,6 +19,11 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 	double readSpeed = 0.0, uploadSpeed = 0.0;
 
+	double totalTimeRead = 0.0, totalTimeUpload = 0.0;
+
+	long long sizeRead = 0;
+	unsigned long long sizeUploaded = 0;
+
 	std::cout << colorize("Starting upload of size: ", Color::BLUE) << colorize(
 		humanReadableSize(fileSize), Color::CYAN) << "\n" << std::endl;
 
@@ -28,7 +33,11 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		auto endReadTime = std::chrono::high_resolution_clock::now();
 
 		std::chrono::duration<double> duration = endReadTime - startReadTime;
-		readSpeed = static_cast<double>(chunkSize) / duration.count();
+
+		totalTimeRead += duration.count();
+		sizeRead += chunkSize;
+
+		readSpeed = static_cast<double>(sizeRead) / totalTimeRead;
 
 		auto startUploadTime = std::chrono::high_resolution_clock::now();
 
@@ -37,10 +46,15 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		auto endUploadTime = std::chrono::high_resolution_clock::now();
 
 		duration = endUploadTime - startUploadTime;
-		uploadSpeed = static_cast<double>(chunkSize) / duration.count();
 
-		std::cout << "\r" << colorize("Sending data: ", Color::BLUE) + colorize(humanReadableSize( (i+1) * chunkSize), Color::CYAN) +
-				colorize("/", Color::BLUE) + colorize(humanReadableSize((totalChunks + 1) * chunkSize), Color::CYAN) + colorize(
+		totalTimeUpload += duration.count();
+		sizeUploaded += chunkSize;
+
+		uploadSpeed = static_cast<double>(sizeUploaded) / totalTimeUpload;
+
+		std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
+				colorize(humanReadableSize(( i + 1 ) * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) +
+				colorize(humanReadableSize(( totalChunks + 1 ) * chunkSize), Color::CYAN) + colorize(
 					std::string(" (") +
 					std::to_string(( static_cast<double>(i + 1) / static_cast<double>(totalChunks) ) * 100.0).
 					substr(0, 5) + " %)",
@@ -50,9 +64,10 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 	file.read(buffer.get(), static_cast<std::streamsize>(lastChunkSize));
 	connection.send(std::string(buffer.get(), lastChunkSize));
-	std::cout << "\r" << colorize("Sending data: ", Color::BLUE) + colorize(humanReadableSize(totalChunks * chunkSize), Color::CYAN) +
-			colorize("/", Color::BLUE) + colorize(humanReadableSize(totalChunks * chunkSize), Color::CYAN) + colorize(
-				" (100 %)  ", Color::PURPLE) << std::endl;
+	std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
+			colorize(humanReadableSize(totalChunks * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) + colorize(
+				humanReadableSize(totalChunks * chunkSize),
+				Color::CYAN) + colorize(" (100 %)  ", Color::PURPLE) << std::endl;
 
 	connection.sendInternal("DONE");
 	auto hash = connection.receiveInternal();
@@ -63,8 +78,10 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 void downloadFile ( Connection& connection ) {
 	auto fileSize = std::stoll(connection.receiveInternal());
 	auto fileName = connection.receiveInternal();
+	double totalTimeDownload = 0.0, totalTimeWrite = 0.0;
 
 	long long sizeWritten = 0;
+	unsigned long long sizeDownloaded = 0;
 
 
 	std::cout << colorize("Downloading file: ", Color::BLUE) + colorize(fileName, Color::CYAN) << colorize(
@@ -83,16 +100,22 @@ void downloadFile ( Connection& connection ) {
 
 		// calculate download speed
 		std::chrono::duration<double> duration = endDownloadTime - startDownloadTime;
-		auto downloadSpeed = static_cast<double>(chunk.size()) / duration.count();
+
+		sizeDownloaded += chunk.size();
+		totalTimeDownload += duration.count();
+
+		auto downloadSpeed = static_cast<double>(sizeDownloaded) / totalTimeDownload;
 
 		auto writeStart = std::chrono::high_resolution_clock::now();
 		file.write(chunk.c_str(), static_cast<long>(chunk.size()));
 		auto writeEnd = std::chrono::high_resolution_clock::now();
 
 		duration = writeEnd - writeStart;
-		auto writeSpeed = static_cast<double>(chunk.size()) / duration.count();
 
 		sizeWritten += chunk.size();
+		totalTimeWrite += duration.count();
+
+		auto writeSpeed = static_cast<double>(sizeWritten) / totalTimeWrite;
 
 		std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) +
 				colorize(humanReadableSize(sizeWritten), Color::CYAN) + colorize("/", Color::BLUE) +
@@ -162,8 +185,9 @@ int main ( int argc, char* argv[] ) {
 		return 1;
 	}
 
-	if (command == Command::Type::REMOVE) {
-		std::cout << colorize("File with hash ", Color::GREEN) << colorize(fileName, Color::CYAN) << colorize(" removed!", Color::RED) << std::endl;
+	if ( command == Command::Type::REMOVE ) {
+		std::cout << colorize("File with hash ", Color::GREEN) << colorize(fileName, Color::CYAN) << colorize(
+			" removed!", Color::RED) << std::endl;
 		return 0;
 	}
 	std::cout << colorize("Server ready!\n", Color::GREEN) << std::endl;
