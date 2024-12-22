@@ -6,7 +6,7 @@ COPY . /app
 WORKDIR /app
 
 # Install dependencies - sodium cmake g++ make
-RUN apk add --no-cache cmake g++ make \
+RUN apk add --no-cache pkgconf libsodium-dev cmake g++ make \
     && cmake -B build -S . \
     && cmake --build build --target hikup-server \
     && mv build/hikup-server /app/hikup-server \
