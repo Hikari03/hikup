@@ -28,13 +28,6 @@ void ConnectionServer::init () {
 	initEncryption();
 
 	_active = true;
-
-	// unset timeout since we are done with initialization => valid connection
-	timeout.tv_sec = 0;
-
-	if ( setsockopt(_clientInfo.socket_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
-		throw std::runtime_error("setsockopt failed");
-	}
 }
 
 void ConnectionServer::initEncryption () {
@@ -70,7 +63,7 @@ void ConnectionServer::initEncryption () {
 	_encrypted = true;
 }
 
-void ConnectionServer::clearBuffer () { memset(_buffer, '\0', _sizeOfPreviousMessage); }
+void ConnectionServer::clearBuffer () { memset(_buffer, '\0', 4096); }
 
 std::string ConnectionServer::receive () {
 	_message.clear();
@@ -84,9 +77,10 @@ std::string ConnectionServer::receive () {
 	}
 
 	while ( !_message.ends_with(_end) ) {
+		//std::cout << "RECEIVE BUFFER BEFORE CLEAR|  " << _clientInfo.socket_ << ": " << _buffer << std::endl;
 		clearBuffer();
 
-		_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer, 4096, 0);
+		_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer, 4092, 0);
 
 
 		if ( _sizeOfPreviousMessage < 0 ) {
@@ -102,7 +96,7 @@ std::string ConnectionServer::receive () {
 		//std::cout << "RECEIVE |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << _message << std::endl;
 	}
 
-	std::cout << "RECEIVE |  " << _clientInfo.socket_ << ": " << _message << std::endl;
+	//std::cout << "RECEIVE |  " << _clientInfo.socket_ << ": " << _message << std::endl;
 
 	// cut off the _end
 
@@ -135,7 +129,7 @@ std::string ConnectionServer::receive () {
 	else
 		_moreInBuffer = true;
 
-	std::cout << "RECEIVE2 |  " << _clientInfo.socket_ << ": " << _message << std::endl;
+	//std::cout << "RECEIVE2 |  " << _clientInfo.socket_ << ": " << _message << std::endl;
 
 	return _message;
 }
@@ -144,7 +138,7 @@ std::string ConnectionServer::receiveInternal () {
 	const auto message = receive();
 
 	if ( !message.contains(_internal) )
-		throw std::runtime_error("Invalid message received");
+		throw std::runtime_error("Invalid message received (internal)");
 
 	return message.substr(strlen(_internal));
 }
@@ -153,7 +147,7 @@ std::string ConnectionServer::receiveData () {
 	const auto message = receive();
 
 	if ( !message.contains(_data) )
-		throw std::runtime_error("Invalid message received");
+		throw std::runtime_error("Invalid message received (data)");
 
 	return message.substr(strlen(_data));
 }
@@ -201,7 +195,7 @@ void ConnectionServer::secretOpen ( std::string& message ) {
 
 	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.c_str()),
 	                    message.size(), nullptr, nullptr, nullptr) < 0 )
-		throw std::runtime_error("Could not decode message: " + message);
+		throw std::runtime_error("Could not decode message");
 
 	auto decrypted = std::make_unique<unsigned char[]>(message.size() / 2 - crypto_box_SEALBYTES);
 

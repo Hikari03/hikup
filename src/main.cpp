@@ -4,9 +4,15 @@
 #include "util.cpp"
 
 void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection ) {
+
+	if (!file.good()) {
+		std::cerr << colorize("Could not open file", Color::RED) << std::endl;
+		return;
+	}
+
 	// we will send the file in chunks of 128KB
-	constexpr size_t chunkSize = 1000;
-	std::vector<char> buffer(chunkSize);
+	constexpr size_t chunkSize = 128 * 1000;
+	auto buffer = std::make_unique<char[]>(chunkSize);
 
 	const unsigned long long totalChunks = fileSize / chunkSize + 1;
 	const size_t lastChunkSize = fileSize % chunkSize;
@@ -18,7 +24,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 	for ( unsigned long long i = 0; i < totalChunks - 1; ++i ) {
 		auto startReadTime = std::chrono::high_resolution_clock::now();
-		file.read(buffer.data(), chunkSize);
+		file.read(buffer.get(), chunkSize);
 		auto endReadTime = std::chrono::high_resolution_clock::now();
 
 		std::chrono::duration<double> duration = endReadTime - startReadTime;
@@ -26,7 +32,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 		auto startUploadTime = std::chrono::high_resolution_clock::now();
 
-		connection.send(std::string(buffer.data(), chunkSize));
+		connection.send(std::string(buffer.get(), chunkSize));
 
 		auto endUploadTime = std::chrono::high_resolution_clock::now();
 
@@ -42,14 +48,16 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 				+ colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
 	}
 
-	file.read(buffer.data(), static_cast<std::streamsize>(lastChunkSize));
-	connection.send(std::string(buffer.data(), static_cast<std::streamsize>(lastChunkSize)));
+	file.read(buffer.get(), static_cast<std::streamsize>(lastChunkSize));
+	connection.send(std::string(buffer.get(), lastChunkSize));
 	std::cout << "\r" << colorize("Sending chunk ", Color::BLUE) + colorize(std::to_string(totalChunks), Color::CYAN) +
 			colorize("/", Color::BLUE) + colorize(std::to_string(totalChunks), Color::CYAN) + colorize(
 				" (100 %)  ", Color::PURPLE) << std::endl;
 
 	connection.sendInternal("DONE");
 	auto hash = connection.receiveInternal();
+	std::cout << colorize("File uploaded successfully with hash: ", Color::GREEN) + colorize(hash, Color::CYAN) <<
+			std::endl;
 }
 
 void downloadFile ( Connection& connection ) {
@@ -121,11 +129,21 @@ int main ( int argc, char* argv[] ) {
 		return 1;
 	}
 
+	std::string hash;
 
 	connection.sendInternal("command:" + Command::toString(command));
 	if ( command == Command::Type::UPLOAD ) {
 		connection.sendInternal("size:" + std::to_string(fileSize));
 		connection.sendInternal("filename:" + fileName);
+
+		if (!file.good())
+			std::cout << "wtfb" << std::endl;
+
+		hash = computeHash(file);
+		if (!file.good())
+			std::cout << "wtfa" << std::endl;
+
+		connection.sendInternal("hash:" + hash);
 	}
 	else if ( command == Command::Type::DOWNLOAD ) {
 		fileName = argv[2];
@@ -133,11 +151,13 @@ int main ( int argc, char* argv[] ) {
 	}
 
 	if ( connection.receiveInternal() != "OK" ) {
-		std::cerr << colorize("Server did not accept the request - ", Color::RED) << std::endl;
+		std::cerr << colorize("Server did not accept the request\n", Color::RED);
+
 		if ( command == Command::Type::UPLOAD ) {
-			std::cout << colorize("File already exists", Color::RED) << std::endl;
+			std::cout << colorize("Reason: file already exists\n", Color::RED) << colorize("Hash: ", Color::PURPLE) <<
+					colorize(hash, Color::CYAN) << std::endl;
 		}
-		else { std::cout << colorize("File does not exist", Color::RED) << std::endl; }
+		else { std::cout << colorize("Reason: ile does not exist", Color::RED) << std::endl; }
 		return 1;
 	}
 

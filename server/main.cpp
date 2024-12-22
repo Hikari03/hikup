@@ -13,9 +13,11 @@
 #include "terminal.cpp"
 #include "accepter.cpp"
 #include "ConnectionServer.h"
+#include "utilServer.cpp"
 
 sig_atomic_t stopRequested = 0;
 std::condition_variable callBack;
+int clientSocket = -1;
 
 // used for graceful shutdown in docker
 void signalHandler ( const int signal ) {
@@ -23,18 +25,27 @@ void signalHandler ( const int signal ) {
 	if ( signal == SIGINT || signal == SIGTERM )
 		stopRequested = 1;
 
+	shutdown(clientSocket, SHUT_RDWR);
+	close(clientSocket);
+
 	callBack.notify_one();
 }
 
-void receiveFile (ConnectionServer& connection) {
+void receiveFile ( ConnectionServer& connection ) {
 	const auto size = stoll(connection.receiveInternal().substr(strlen("size:")));
-	const auto fileName = connection.receiveInternal().substr(strlen("filename:"));
+	auto fileName = connection.receiveInternal().substr(strlen("filename:"));
+	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
 
-	std::filesystem::path _path = std::filesystem::absolute(fileName);
+	// convert all '.' to '$' in the filename
+	std::replace(fileName.begin(), fileName.end(), '.', '<');
 
-	if ( std::filesystem::exists(_path) ) {
-		connection.sendInternal("NO");
+	std::filesystem::path _path = std::filesystem::absolute(fileName + '.' + hashFromClient);
+
+	std::cout << _path << std::endl;
+
+	if ( std::filesystem::exists(_path)) {
 		std::cout << "main: file already exists" << std::endl;
+		connection.sendInternal("NO");
 		return;
 	}
 
@@ -52,10 +63,9 @@ void receiveFile (ConnectionServer& connection) {
 	crypto_generichash_init(&state, nullptr, 0, sizeof hash);
 
 	while ( true ) {
-
 		message = connection.receive();
 
-		if (message.starts_with(_internal"DONE"))
+		if ( message.starts_with(_internal"DONE") )
 			break;
 
 		file.write(message.c_str(), message.size());
@@ -63,24 +73,26 @@ void receiveFile (ConnectionServer& connection) {
 
 		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.c_str()), message.size());
 
-		std::cout << '\r' << "main: " << sizeWritten << " / " << size << " bytes written" << std::flush;
+		std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(size) << " bytes written" << std::flush;
 	}
 	std::cout << std::endl;
 	file.close();
 
 	crypto_generichash_final(&state, hash, sizeof hash);
 
-	auto hashString = std::string(reinterpret_cast<char*>(hash), sizeof hash);
+	std::ifstream fileStream(fileName, std::ios::binary);
 
-	std::filesystem::rename(fileName, hashString+ "." + fileName);
+	auto hashString = binToHex(hash, sizeof hash);
+
+	std::filesystem::rename(fileName, fileName + "." + hashString);
 
 	connection.sendInternal(hashString);
 }
 
-void serveConnection(ClientInfo client) {
+void serveConnection ( ClientInfo client ) {
 	std::cout << "main: serving client " << client.getIp() << std::endl;
 
-	ConnectionServer connection (std::move(client));
+	ConnectionServer connection(std::move(client));
 
 	connection.init();
 
@@ -88,7 +100,7 @@ void serveConnection(ClientInfo client) {
 
 	std::cout << "main: received message: " << message << std::endl;
 
-	if (message == "command:UPLOAD")
+	if ( message == "command:UPLOAD" )
 		receiveFile(connection);
 }
 
@@ -118,38 +130,39 @@ int main () {
 
 	bool newClientAccepted = false;
 	ClientInfo acceptedClient;
-	int clientSocket = -1;
 
-	std::thread accepterThread(accepter, std::ref(callBack), std::ref(serverSocket), std::ref(acceptedClient), std::ref(newClientAccepted), std::ref(turnOff));
-
+	std::thread accepterThread(accepter, std::ref(callBack), std::ref(serverSocket), std::ref(acceptedClient),
+	                           std::ref(newClientAccepted), std::ref(turnOff));
 
 	std::cout << "main: entering main loop, server started" << std::endl;
 
-	while(true) {
+	while ( true ) {
 		std::unique_lock lock(mutex);
 		callBack.wait(lock);
 
-		std::cout << "main: received notification, acceptedClient: " << std::to_string(newClientAccepted) << std::endl;
-
-		if(newClientAccepted) {
-
-			if(!newClientAccepted)
+		if ( newClientAccepted ) {
+			if ( !newClientAccepted )
 				continue;
 
 			clientSocket = acceptedClient.getSocket();
 
-			serveConnection(std::move(acceptedClient));
+			try {
+				serveConnection(std::move(acceptedClient));
+			}
+			catch ( const std::exception& e ) {
+				std::cerr << "main: error serving client: " << e.what() << std::endl;
+			}
 			newClientAccepted = false;
 		}
 
-		if(stopRequested)
+		if ( stopRequested )
 			turnOff = true;
 
-		if(turnOff) {
+		if ( turnOff ) {
 			// cleanup
 			lock.unlock();
 			std::cout << "main: cleaning up threads" << std::endl;
-			if(stopRequested) {
+			if ( stopRequested ) {
 				std::cout << "main: stop requested" << std::endl;
 				pthread_cancel(terminalThread.native_handle());
 			}
@@ -157,7 +170,7 @@ int main () {
 				terminalThread.join();
 
 			std::cout << "main: terminating client" << std::endl;
-			if (clientSocket != -1) {
+			if ( clientSocket != -1 ) {
 				shutdown(clientSocket, SHUT_RDWR);
 				close(clientSocket);
 			}
@@ -169,8 +182,6 @@ int main () {
 			std::cout << "main: accepter closed" << std::endl;
 			break;
 		}
-
-
 	}
 
 	std::cout << "main: closing server" << std::endl;

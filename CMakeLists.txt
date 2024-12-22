@@ -19,7 +19,8 @@ add_executable(hikup-server server/main.cpp
         server/ClientInfo.cpp
         server/ClientInfo.h
         server/ConnectionServer.cpp
-        server/ConnectionServer.h)
+        server/ConnectionServer.h
+        server/utilServer.cpp)
 
 target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hikup ${LIBSODIUM_LIBRARIES})
