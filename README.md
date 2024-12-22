@@ -2,6 +2,8 @@
 
 [![wakatime](https://wakatime.com/badge/user/d150384a-c51c-4144-8898-22213a8a0f55/project/99adba71-871b-4afe-af2c-5039c8030cc8.svg)](https://wakatime.com/badge/user/d150384a-c51c-4144-8898-22213a8a0f55/project/99adba71-871b-4afe-af2c-5039c8030cc8)
 
+![](https://tokei.rs/b1/github/Hikari03/hikup)
+
 ### File Sharing Made Easy
 
 - **File Management**: Effortlessly upload, download, and remove files with just one command.
