@@ -4,8 +4,7 @@
 #include "util.cpp"
 
 void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection ) {
-
-	if (!file.good()) {
+	if ( !file.good() ) {
 		std::cerr << colorize("Could not open file", Color::RED) << std::endl;
 		return;
 	}
@@ -61,10 +60,10 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 }
 
 void downloadFile ( Connection& connection ) {
-	// get total chunks
-	auto totalChunks = std::stoll(connection.receiveInternal());
 	auto fileSize = std::stoll(connection.receiveInternal());
 	auto fileName = connection.receiveInternal();
+
+	long long sizeWritten = 0;
 
 
 	std::cout << colorize("Downloading file: ", Color::BLUE) + colorize(fileName, Color::CYAN) << colorize(
@@ -73,10 +72,13 @@ void downloadFile ( Connection& connection ) {
 	// create file
 	std::ofstream file(fileName, std::ios::binary);
 
-	for ( unsigned long long i = 0; i < totalChunks; ++i ) {
+	while ( true ) {
 		auto startDownloadTime = std::chrono::high_resolution_clock::now();
-		auto chunk = connection.receiveData();
+		auto chunk = connection.receive();
 		auto endDownloadTime = std::chrono::high_resolution_clock::now();
+
+		if ( chunk == _internal"DONE" )
+			break;
 
 		// calculate download speed
 		std::chrono::duration<double> duration = endDownloadTime - startDownloadTime;
@@ -89,10 +91,13 @@ void downloadFile ( Connection& connection ) {
 		duration = writeEnd - writeStart;
 		auto writeSpeed = static_cast<double>(chunk.size()) / duration.count();
 
-		std::cout << "\r" << colorize("Sending chunk ", Color::BLUE) + colorize(std::to_string(i + 1), Color::CYAN) +
-				colorize("/", Color::BLUE) + colorize(std::to_string(totalChunks), Color::CYAN) + colorize(
+		sizeWritten += chunk.size();
+
+		std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) +
+				colorize(humanReadableSize(sizeWritten), Color::CYAN) + colorize("/", Color::BLUE) +
+				colorize(humanReadableSize(fileSize), Color::CYAN) + colorize(
 					std::string(" (") +
-					std::to_string(( static_cast<double>(i + 1) / static_cast<double>(totalChunks) ) * 100.0).
+					std::to_string(( static_cast<double>(sizeWritten) / static_cast<double>(fileSize) ) * 100.0).
 					substr(0, 5) + " %)",
 					Color::PURPLE) + " ┃ " + colorize("Write: " + humanReadableSpeed(writeSpeed), Color::LL_BLUE) +
 				" ━━ " + colorize("Down: " + humanReadableSpeed(downloadSpeed), Color::GREEN) + "  " << std::flush;
@@ -136,12 +141,7 @@ int main ( int argc, char* argv[] ) {
 		connection.sendInternal("size:" + std::to_string(fileSize));
 		connection.sendInternal("filename:" + fileName);
 
-		if (!file.good())
-			std::cout << "wtfb" << std::endl;
-
 		hash = computeHash(file);
-		if (!file.good())
-			std::cout << "wtfa" << std::endl;
 
 		connection.sendInternal("hash:" + hash);
 	}

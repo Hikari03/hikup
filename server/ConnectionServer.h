@@ -19,6 +19,8 @@ public:
 
 	void init ();
 
+	void send ( const std::string& message );
+
 	void sendInternal ( const std::string& message );
 
 	void sendData ( const std::string& message );
@@ -51,8 +53,6 @@ private:
 	void initEncryption ();
 
 	void clearBuffer ();
-
-	void sendMessage ( const std::string& message );
 
 	void secretOpen ( std::string& message );
 

@@ -46,7 +46,7 @@ void ConnectionServer::initEncryption () {
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-	sendMessage(_internal"publicKey:" + std::string(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2));
+	send(_internal"publicKey:" + std::string(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2));
 
 	receive();
 
@@ -152,7 +152,7 @@ std::string ConnectionServer::receiveData () {
 	return message.substr(strlen(_data));
 }
 
-void ConnectionServer::sendMessage ( const std::string& message ) {
+void ConnectionServer::send ( const std::string& message ) {
 	auto messageToSend = message;
 
 	//std::cout << "SEND1 |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
@@ -171,9 +171,9 @@ void ConnectionServer::sendMessage ( const std::string& message ) {
 	catch ( std::exception& e ) { throw std::runtime_error("Could not send message to client"); }
 }
 
-void ConnectionServer::sendData ( const std::string& message ) { sendMessage(_data + message); }
+void ConnectionServer::sendData ( const std::string& message ) { send(_data + message); }
 
-void ConnectionServer::sendInternal ( const std::string& message ) { sendMessage(_internal + message); }
+void ConnectionServer::sendInternal ( const std::string& message ) { send(_internal + message); }
 
 void ConnectionServer::secretSeal ( std::string& message ) {
 	auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());

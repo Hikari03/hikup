@@ -43,7 +43,7 @@ void receiveFile ( ConnectionServer& connection ) {
 
 	std::cout << _path << std::endl;
 
-	if ( std::filesystem::exists(_path)) {
+	if ( std::filesystem::exists(_path) ) {
 		std::cout << "main: file already exists" << std::endl;
 		connection.sendInternal("NO");
 		return;
@@ -63,9 +63,7 @@ void receiveFile ( ConnectionServer& connection ) {
 	crypto_generichash_init(&state, nullptr, 0, sizeof hash);
 
 	while ( true ) {
-		try{
-			message = connection.receive();
-		}
+		try { message = connection.receive(); }
 		catch ( const std::exception& e ) {
 			std::cerr << "main: error receiving message: " << e.what() << std::endl;
 			file.close();
@@ -81,7 +79,8 @@ void receiveFile ( ConnectionServer& connection ) {
 
 		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.c_str()), message.size());
 
-		std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(size) << " bytes written" << std::flush;
+		std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(size) <<
+				" bytes written" << std::flush;
 	}
 	std::cout << std::endl;
 	file.close();
@@ -97,6 +96,56 @@ void receiveFile ( ConnectionServer& connection ) {
 	connection.sendInternal(hashString);
 }
 
+void sendFile ( ConnectionServer& connectionServer ) {
+	auto hash = connectionServer.receiveInternal().substr(strlen("hash:"));
+	std::string fileName;
+
+	for (const auto& file : std::filesystem::directory_iterator("."))
+		if ( file.path().extension() == '.' + hash )
+			fileName = file.path().filename();
+
+	if (fileName.empty()) {
+		std::cout << "main: file not found" << std::endl;
+		connectionServer.sendInternal("NO");
+		return;
+	}
+
+	std::ifstream file(fileName, std::ios::binary);
+
+	if (!file.good()) {
+		std::cout << "main: could not open file" << std::endl;
+		connectionServer.sendInternal("NO");
+		return;
+	}
+
+	connectionServer.sendInternal("OK");
+
+	auto fileSize = std::filesystem::file_size(fileName);
+
+	constexpr size_t chunkSize = 1024;
+	auto buffer = std::make_unique<char[]>(chunkSize);
+
+	const unsigned long long totalChunks = fileSize / chunkSize + 1;
+	const size_t lastChunkSize = fileSize % chunkSize;
+
+	connectionServer.sendInternal(std::to_string(fileSize));
+
+	auto clientFileName = fileName.substr(0, fileName.find_last_of('.'));
+	std::replace(clientFileName.begin(), clientFileName.end(), '<', '.');
+
+	connectionServer.sendInternal(clientFileName);
+
+	for ( unsigned long long i = 0; i < totalChunks - 1; ++i ) {
+		file.read(buffer.get(), chunkSize);
+		connectionServer.send(std::string(buffer.get(), chunkSize));
+	}
+
+	file.read(buffer.get(), static_cast<std::streamsize>(lastChunkSize));
+	connectionServer.send(std::string(buffer.get(), lastChunkSize));
+
+	connectionServer.sendInternal("DONE");
+}
+
 void serveConnection ( ClientInfo client ) {
 	std::cout << "main: serving client " << client.getIp() << std::endl;
 
@@ -110,6 +159,8 @@ void serveConnection ( ClientInfo client ) {
 
 	if ( message == "command:UPLOAD" )
 		receiveFile(connection);
+	else if ( message == "command:DOWNLOAD" )
+		sendFile(connection);
 }
 
 int main () {
@@ -154,12 +205,8 @@ int main () {
 
 			clientSocket = acceptedClient.getSocket();
 
-			try {
-				serveConnection(std::move(acceptedClient));
-			}
-			catch ( const std::exception& e ) {
-				std::cerr << "main: error serving client: " << e.what() << std::endl;
-			}
+			try { serveConnection(std::move(acceptedClient)); }
+			catch ( const std::exception& e ) { std::cerr << "main: error serving client: " << e.what() << std::endl; }
 			newClientAccepted = false;
 		}
 
