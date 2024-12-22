@@ -63,7 +63,15 @@ void receiveFile ( ConnectionServer& connection ) {
 	crypto_generichash_init(&state, nullptr, 0, sizeof hash);
 
 	while ( true ) {
-		message = connection.receive();
+		try{
+			message = connection.receive();
+		}
+		catch ( const std::exception& e ) {
+			std::cerr << "main: error receiving message: " << e.what() << std::endl;
+			file.close();
+			std::filesystem::remove(fileName);
+			return;
+		}
 
 		if ( message.starts_with(_internal"DONE") )
 			break;
