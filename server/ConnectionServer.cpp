@@ -4,7 +4,6 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
-#include <asm-generic/socket.h>
 #include <sys/socket.h>
 
 ConnectionServer::ConnectionServer ( ClientInfo clientInfo )
