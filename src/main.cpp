@@ -107,7 +107,7 @@ void downloadFile ( Connection& connection ) {
 
 int main ( int argc, char* argv[] ) {
 	if ( argc < 4 ) {
-		std::cout << "Usage: " << argv[0] << " <up <file> | down <hash>> <server> \n\n"
+		std::cout << "Usage: " << argv[0] << " <up <file> | down <hash> | rm <hash>> <server> \n\n"
 				"If file is successfully uploaded, you will get file hash\n"
 				"which you need to input if you want to download it" << std::endl;
 		return 1;
