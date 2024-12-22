@@ -39,8 +39,8 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		duration = endUploadTime - startUploadTime;
 		uploadSpeed = static_cast<double>(chunkSize) / duration.count();
 
-		std::cout << "\r" << colorize("Sending chunk ", Color::BLUE) + colorize(std::to_string(i + 1), Color::CYAN) +
-				colorize("/", Color::BLUE) + colorize(std::to_string(totalChunks + 1), Color::CYAN) + colorize(
+		std::cout << "\r" << colorize("Sending data: ", Color::BLUE) + colorize(humanReadableSize( (i+1) * chunkSize), Color::CYAN) +
+				colorize("/", Color::BLUE) + colorize(humanReadableSize((totalChunks + 1) * chunkSize), Color::CYAN) + colorize(
 					std::string(" (") +
 					std::to_string(( static_cast<double>(i + 1) / static_cast<double>(totalChunks) ) * 100.0).
 					substr(0, 5) + " %)",
@@ -50,8 +50,8 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 	file.read(buffer.get(), static_cast<std::streamsize>(lastChunkSize));
 	connection.send(std::string(buffer.get(), lastChunkSize));
-	std::cout << "\r" << colorize("Sending chunk ", Color::BLUE) + colorize(std::to_string(totalChunks), Color::CYAN) +
-			colorize("/", Color::BLUE) + colorize(std::to_string(totalChunks), Color::CYAN) + colorize(
+	std::cout << "\r" << colorize("Sending data: ", Color::BLUE) + colorize(humanReadableSize(totalChunks * chunkSize), Color::CYAN) +
+			colorize("/", Color::BLUE) + colorize(humanReadableSize(totalChunks * chunkSize), Color::CYAN) + colorize(
 				" (100 %)  ", Color::PURPLE) << std::endl;
 
 	connection.sendInternal("DONE");
