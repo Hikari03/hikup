@@ -2,9 +2,7 @@
 #include <fstream>
 #include <string>
 #include <sodium.h>
-#include <iostream>
 
-#include "CommandType.cpp"
 #include "Color.cpp"
 
 /**
@@ -33,15 +31,6 @@ inline std::tuple<std::ifstream, std::ifstream::pos_type, std::string> resolveFi
 	file.seekg(0, std::ios::beg);
 
 	return {std::move(file), size, _path.filename()};
-}
-
-inline Command::Type resolveCommand ( const std::string& command ) {
-	if ( command == "up" )
-		return Command::Type::UPLOAD;
-	if ( command == "down" )
-		return Command::Type::DOWNLOAD;
-
-	throw std::runtime_error("Invalid command: " + command);
 }
 
 inline std::string colorize ( const std::string& text, Color color ) {

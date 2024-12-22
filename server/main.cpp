@@ -100,11 +100,11 @@ void sendFile ( ConnectionServer& connectionServer ) {
 	auto hash = connectionServer.receiveInternal().substr(strlen("hash:"));
 	std::string fileName;
 
-	for (const auto& file : std::filesystem::directory_iterator("."))
+	for ( const auto& file: std::filesystem::directory_iterator(".") )
 		if ( file.path().extension() == '.' + hash )
 			fileName = file.path().filename();
 
-	if (fileName.empty()) {
+	if ( fileName.empty() ) {
 		std::cout << "main: file not found" << std::endl;
 		connectionServer.sendInternal("NO");
 		return;
@@ -112,7 +112,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 
 	std::ifstream file(fileName, std::ios::binary);
 
-	if (!file.good()) {
+	if ( !file.good() ) {
 		std::cout << "main: could not open file" << std::endl;
 		connectionServer.sendInternal("NO");
 		return;
@@ -146,6 +146,26 @@ void sendFile ( ConnectionServer& connectionServer ) {
 	connectionServer.sendInternal("DONE");
 }
 
+void removeFile ( ConnectionServer& connectionServer ) {
+	auto hash = connectionServer.receiveInternal().substr(strlen("hash:"));
+
+	std::string fileName;
+
+	for ( const auto& file: std::filesystem::directory_iterator(".") )
+		if ( file.path().extension() == '.' + hash )
+			fileName = file.path().filename();
+
+	if ( fileName.empty() ) {
+		std::cout << "main: file not found" << std::endl;
+		connectionServer.sendInternal("NO");
+		return;
+	}
+
+	std::filesystem::remove(fileName);
+
+	connectionServer.sendInternal("OK");
+}
+
 void serveConnection ( ClientInfo client ) {
 	std::cout << "main: serving client " << client.getIp() << std::endl;
 
@@ -161,6 +181,8 @@ void serveConnection ( ClientInfo client ) {
 		receiveFile(connection);
 	else if ( message == "command:DOWNLOAD" )
 		sendFile(connection);
+	else if ( message == "command:REMOVE" )
+		removeFile(connection);
 }
 
 int main () {

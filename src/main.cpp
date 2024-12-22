@@ -2,6 +2,7 @@
 
 #include "Connection.h"
 #include "util.cpp"
+#include "CommandType.cpp"
 
 void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection ) {
 	if ( !file.good() ) {
@@ -119,7 +120,7 @@ int main ( int argc, char* argv[] ) {
 	std::string fileName;
 
 	try {
-		command = resolveCommand(argv[1]);
+		command = Command::resolveCommand(argv[1]);
 		if ( command == Command::Type::UPLOAD ) {
 			auto [_file, _fileSize, _fileName] = resolveFile(argv[2]);
 			file = std::move(_file);
@@ -145,7 +146,7 @@ int main ( int argc, char* argv[] ) {
 
 		connection.sendInternal("hash:" + hash);
 	}
-	else if ( command == Command::Type::DOWNLOAD ) {
+	else if ( command == Command::Type::DOWNLOAD || command == Command::Type::REMOVE ) {
 		fileName = argv[2];
 		connection.sendInternal("hash:" + fileName);
 	}
@@ -157,10 +158,14 @@ int main ( int argc, char* argv[] ) {
 			std::cout << colorize("Reason: file already exists\n", Color::RED) << colorize("Hash: ", Color::PURPLE) <<
 					colorize(hash, Color::CYAN) << std::endl;
 		}
-		else { std::cout << colorize("Reason: ile does not exist", Color::RED) << std::endl; }
+		else { std::cout << colorize("Reason: file does not exist", Color::RED) << std::endl; }
 		return 1;
 	}
 
+	if (command == Command::Type::REMOVE) {
+		std::cout << colorize("File with hash ", Color::GREEN) << colorize(fileName, Color::CYAN) << colorize(" removed!", Color::RED) << std::endl;
+		return 0;
+	}
 	std::cout << colorize("Server ready!\n", Color::GREEN) << std::endl;
 
 	if ( command == Command::Type::UPLOAD )
