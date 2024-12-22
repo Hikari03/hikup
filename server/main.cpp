@@ -122,7 +122,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 
 	auto fileSize = std::filesystem::file_size(fileName);
 
-	constexpr size_t chunkSize = 1024;
+	constexpr size_t chunkSize = 128 * 1024;
 	auto buffer = std::make_unique<char[]>(chunkSize);
 
 	const unsigned long long totalChunks = fileSize / chunkSize + 1;
