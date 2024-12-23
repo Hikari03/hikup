@@ -1,11 +1,19 @@
 cmake_minimum_required(VERSION 3.30)
 project(hikup)
 
+if(NOT CMAKE_BUILD_TYPE)
+    message(STATUS "Setting default build type to Release")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DHIKUP_DEBUG -Wall -Wextra -g -pedantic -Werror")
+set(CMAKE_CXX_FLAGS_RELEASE  "${CMAKE_CXX_FLAGS_RELEASE} -Wall -Wextra -pedantic -Werror -O2")
 
 # Include libsodium
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBSODIUM libsodium)
+pkg_check_modules(LIBSODIUM REQUIRED libsodium)
+
 add_executable(hikup src/main.cpp
         src/Connection.h
         src/Connection.cpp
