@@ -126,6 +126,8 @@ void downloadFile ( Connection& connection ) {
 					Color::PURPLE) + " ┃ " + colorize("Write: " + humanReadableSpeed(writeSpeed), Color::LL_BLUE) +
 				" ━━ " + colorize("Down: " + humanReadableSpeed(downloadSpeed), Color::GREEN) + "  " << std::flush;
 	}
+
+	std::cout << std::endl;
 }
 
 int main ( int argc, char* argv[] ) {
