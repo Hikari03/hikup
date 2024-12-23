@@ -21,6 +21,7 @@ Connection::Connection () {
 	if ( sodium_init() < 0 ) { throw std::runtime_error("Could not initialize sodium"); }
 
 	crypto_box_keypair(_keyPair.publicKey, _keyPair.secretKey);
+	memset(_buffer, '\0', 4096);
 }
 
 void Connection::connectToServer ( std::string ip, int port ) {
@@ -87,6 +88,24 @@ void Connection::_send ( const char* message, size_t length ) {
 #endif
 }
 
+std::string Connection::_receive () {
+	std::string message;
+
+	while ( !message.ends_with(_end) ) {
+		clearBuffer();
+
+		_sizeOfPreviousMessage = recv(_socket, _buffer, 64, 0);
+
+		if ( _sizeOfPreviousMessage < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != MSG_WAITALL ) {
+			throw std::runtime_error("Could not receive message from server: " + std::string(strerror(errno)));
+		}
+
+		message += _buffer;
+	}
+
+	return message;
+}
+
 void Connection::send ( const std::string& message ) {
 	auto messageToSend = message;
 
@@ -112,44 +131,34 @@ void Connection::sendData ( const std::string& message ) { send(_data + message)
 void Connection::sendInternal ( const std::string& message ) { send(_internal + message); }
 
 std::string Connection::receive () {
-	std::string message;
 
 	if ( _moreInBuffer ) {
-		message = _messagesBuffer[0];
+		auto message = _messagesBuffer[0];
 		_messagesBuffer.erase(_messagesBuffer.begin());
 		if ( _messagesBuffer.empty() )
 			_moreInBuffer = false;
 		return message;
 	}
 
-
-	while ( !message.ends_with(_end) ) {
-		clearBuffer();
-
-		_sizeOfPreviousMessage = recv(_socket, _buffer, 4092, 0);
-
-		if ( _sizeOfPreviousMessage < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != MSG_WAITALL ) {
-			throw std::runtime_error("Could not receive message from server: " + std::string(strerror(errno)));
-		}
-
-		message += _buffer;
-	}
+	auto message = _receive();
 
 	// remove the _end string
 
 	std::vector<std::string> messages;
 	std::string tmpMessage;
-	size_t pos = 0;
+	size_t sPos = 0, ePos = 0;
 	bool first = true;
 
-	while ( ( pos = message.find(_end) ) != std::string::npos ) {
+	while ( ( ePos = message.find(_end, sPos) ) != std::string::npos ) {
 		if ( first ) {
-			tmpMessage = message.substr(0, pos);
+			tmpMessage = message.substr(sPos, ePos-sPos);
 			first = false;
 		}
 		else
-			messages.push_back(message.substr(0, pos));
-		message.erase(0, pos + strlen(_end));
+			messages.push_back(message.substr(sPos, ePos-sPos));
+
+
+		sPos = ePos + strlen(_end);
 	}
 
 	message = tmpMessage;
@@ -198,6 +207,85 @@ std::string Connection::receive () {
 	return message;
 }
 
+std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime () {
+
+	if ( _moreInBuffer ) {
+		auto message = _messagesBuffer[0];
+		_messagesBuffer.erase(_messagesBuffer.begin());
+		if ( _messagesBuffer.empty() )
+			_moreInBuffer = false;
+		return {message, std::chrono::duration<double>(0)};
+	}
+
+	auto start = std::chrono::high_resolution_clock::now();
+	auto message = _receive();
+	auto end = std::chrono::high_resolution_clock::now();
+
+	// remove the _end string
+
+	std::vector<std::string> messages;
+	std::string tmpMessage;
+	size_t sPos = 0, ePos = 0;
+	bool first = true;
+
+	while ( ( ePos = message.find(_end, sPos) ) != std::string::npos ) {
+		if ( first ) {
+			tmpMessage = message.substr(sPos, ePos-sPos);
+			first = false;
+		}
+		else
+			messages.push_back(message.substr(sPos, ePos-sPos));
+
+
+		sPos = ePos + strlen(_end);
+	}
+
+	message = tmpMessage;
+	_messagesBuffer = messages;
+
+	if ( _encrypted ) {
+		_secretOpen(message);
+		for ( auto& messageEnc: _messagesBuffer )
+			_secretOpen(messageEnc);
+	}
+
+	if ( _messagesBuffer.empty() )
+		_moreInBuffer = false;
+	else
+		_moreInBuffer = true;
+
+
+#ifdef HIKUP_DEBUG
+	std::cout << "RECEIVE | " << message << std::endl;
+	std::cout << "RECEIVE BUFFER | "
+			  << std::accumulate(_messagesBuffer.begin(), _messagesBuffer.end(), std::string(),
+								 [](const std::string &a, const std::string &b) {
+									 return a + b + " | ";
+								 })
+			  << std::endl;
+#endif
+
+
+	if ( message.contains(_internal"publicKey:") ) {
+		std::string publicKey = message.substr(strlen(_internal"publicKey:"));
+
+		if ( sodium_hex2bin(_remotePublicKey, crypto_box_PUBLICKEYBYTES, publicKey.c_str(), publicKey.size(), nullptr,
+							nullptr, nullptr) < 0 ) { throw std::runtime_error("Could not decode public key"); }
+
+		auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
+
+		sodium_bin2hex(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2 + 1, _keyPair.publicKey, crypto_box_PUBLICKEYBYTES);
+
+		//std::cout << "public key: " << pk_base64.get() << std::endl;
+
+		send(_internal"publicKey:" + std::string(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2));
+
+		_encrypted = true;
+	}
+
+	return {message, end - start};
+}
+
 std::string Connection::receiveInternal () {
 	const auto message = receive();
 
@@ -233,7 +321,7 @@ Connection::~Connection () {
 		close();
 }
 
-void Connection::clearBuffer () { memset(_buffer, '\0', 4096); }
+void Connection::clearBuffer () { memset(_buffer, '\0', _sizeOfPreviousMessage); }
 
 std::vector<std::string> Connection::dnsLookup ( const std::string& domain, int ipv ) {
 	// credit to http://www.zedwood.com/article/cpp-dns-lookup-ipv4-and-ipv6
@@ -296,7 +384,7 @@ void Connection::_secretSeal ( std::string& message ) {
 void Connection::_secretOpen ( std::string& message ) {
 
 	if (message.length() % 2 != 0)
-		throw std::runtime_error("Invalid message to decrypt");
+		throw std::runtime_error("Invalid message to decrypt: " + message);
 
 	auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
 
