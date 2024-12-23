@@ -24,7 +24,7 @@
 #include <ws2tcpip.h>
 #endif
 
-#define _end "::--///-$$$"
+#define _end "::--///--$$$"
 #define _internal "INTERNAL::"
 #define _data "DATA::"
 
@@ -56,6 +56,8 @@ public:
 
 	std::string receive ();
 
+	std::tuple<std::string, std::chrono::duration<double>> receiveWTime();
+
 	std::string receiveInternal ();
 
 	std::string receiveData ();
@@ -68,7 +70,7 @@ private:
 		unsigned char secretKey[crypto_box_SECRETKEYBYTES];
 	};
 
-	char _buffer[4096] = {0};
+	char _buffer[4097] = {};
 	std::vector<std::string> _messagesBuffer;
 	KeyPair _keyPair;
 	unsigned char _remotePublicKey[crypto_box_PUBLICKEYBYTES];
@@ -95,6 +97,8 @@ private:
 	[[nodiscard]] static std::vector<std::string> dnsLookup ( const std::string& domain, int ipv = 4 );
 
 	void _send ( const char* message, size_t length );
+
+	std::string _receive ();
 
 	void _secretOpen ( std::string& message );
 

@@ -91,15 +91,11 @@ void downloadFile ( Connection& connection ) {
 	std::ofstream file(fileName, std::ios::binary);
 
 	while ( true ) {
-		auto startDownloadTime = std::chrono::high_resolution_clock::now();
-		auto chunk = connection.receive();
-		auto endDownloadTime = std::chrono::high_resolution_clock::now();
+
+		auto [chunk,duration] = connection.receiveWTime();
 
 		if ( chunk == _internal"DONE" )
 			break;
-
-		// calculate download speed
-		std::chrono::duration<double> duration = endDownloadTime - startDownloadTime;
 
 		sizeDownloaded += chunk.size();
 		totalTimeDownload += duration.count();
@@ -117,14 +113,14 @@ void downloadFile ( Connection& connection ) {
 
 		auto writeSpeed = static_cast<double>(sizeWritten) / totalTimeWrite;
 
-		std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) +
-				colorize(humanReadableSize(sizeWritten), Color::CYAN) + colorize("/", Color::BLUE) +
-				colorize(humanReadableSize(fileSize), Color::CYAN) + colorize(
+		std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) <<
+				colorize(humanReadableSize(sizeWritten), Color::CYAN) << colorize("/", Color::BLUE) <<
+				colorize(humanReadableSize(fileSize), Color::CYAN) << colorize(
 					std::string(" (") +
 					std::to_string(( static_cast<double>(sizeWritten) / static_cast<double>(fileSize) ) * 100.0).
 					substr(0, 5) + " %)",
-					Color::PURPLE) + " ┃ " + colorize("Write: " + humanReadableSpeed(writeSpeed), Color::LL_BLUE) +
-				" ━━ " + colorize("Down: " + humanReadableSpeed(downloadSpeed), Color::GREEN) + "  " << std::flush;
+					Color::PURPLE) << " ┃ " << colorize("Write: " + humanReadableSpeed(writeSpeed), Color::LL_BLUE) <<
+				" ━━ " + colorize("Down: " + humanReadableSpeed(downloadSpeed), Color::GREEN) << "  " << std::flush;
 	}
 
 	std::cout << std::endl;

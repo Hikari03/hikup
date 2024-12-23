@@ -6,7 +6,7 @@
 #include "ClientInfo.h"
 
 
-#define _end "::--///-$$$"
+#define _end "::--///--$$$"
 #define _internal "INTERNAL::"
 #define _data "DATA::"
 
