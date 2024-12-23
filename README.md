@@ -44,7 +44,7 @@ cmake --build build --target hikup -j $(nproc)
 You can get the `docker-update-start.sh`, `docker-attach.sh` and `docker-shutdown.sh`.
 With them, you can control the server with ease.
 - `docker-update-start.sh` will automatically update the image if needed and start the server
-- `docker-attach.sh` will attach you to server console. Use `help` to print available commands. When you want to exit console, use `CTRL + P, CTRL + Q`.
+- `docker-attach.sh` will attach you to server console. When you want to exit console, use `CTRL + P, CTRL + Q`.
 - `docker-shutdown.sh` will shutdown the container
 
 #### Manually
@@ -63,6 +63,8 @@ cmake --build build --target hikup-server -j $(nproc)
 ```
 #### Usage:
 *in hikup/build*
+
+- once started type `q` to stop the server
 ``` bash
 ./hikup-server
 ```
