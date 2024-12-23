@@ -35,6 +35,10 @@ cmake --build build --target hikup -j $(nproc)
 ./hikup # for help
 ```
 ## Server
+
+- **Uses Port** : 6998
+- If you want to change it you can do so in server/ConnectionServer.cpp and src/main.cpp
+
 ### Use Docker
 #### With scripts
 You can get the `docker-update-start.sh`, `docker-attach.sh` and `docker-shutdown.sh`.
