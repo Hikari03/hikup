@@ -8,7 +8,7 @@
 inline std::string humanReadableSize ( size_t size ) {
 	const char* units[] = {"B", "KB", "MB", "GB", "TB"};
 	auto sizeDouble = static_cast<double>(size);
-	int unitIndex = 0;
+	size_t unitIndex = 0;
 
 	// Calculate the appropriate unit
 	while ( sizeDouble >= 1000.0 && unitIndex < std::size(units) - 1 ) {
