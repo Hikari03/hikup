@@ -1,8 +1,8 @@
 #include <iostream>
 
+#include "CommandType.cpp"
 #include "Connection.h"
 #include "util.cpp"
-#include "CommandType.cpp"
 
 void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection ) {
 	if ( !file.good() ) {

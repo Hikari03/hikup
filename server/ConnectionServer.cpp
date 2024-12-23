@@ -59,6 +59,9 @@ void ConnectionServer::initEncryption () {
 
 	//std::cout << "pubKey: " << _remotePublicKey << std::endl;
 
+	for ( auto& string: _messagesBuffer )
+		secretOpen(string);
+
 	_encrypted = true;
 }
 
@@ -137,7 +140,7 @@ std::string ConnectionServer::receiveInternal () {
 	const auto message = receive();
 
 	if ( !message.contains(_internal) )
-		throw std::runtime_error("Invalid message received (internal)");
+		throw std::runtime_error("Invalid message received (internal): " + message);
 
 	return message.substr(strlen(_internal));
 }
@@ -146,7 +149,7 @@ std::string ConnectionServer::receiveData () {
 	const auto message = receive();
 
 	if ( !message.contains(_data) )
-		throw std::runtime_error("Invalid message received (data)");
+		throw std::runtime_error("Invalid message received (data):" + message);
 
 	return message.substr(strlen(_data));
 }
