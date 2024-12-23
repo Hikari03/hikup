@@ -24,6 +24,7 @@
 ### Build
 ```bash
 git clone https://github.com/Hikari03/hikup.git && \
+cd hikup && \
 cmake -B build -S . && \
 cmake --build build --target hikup -j $(nproc)
 ```
@@ -52,6 +53,7 @@ With them, you can control the server with ease.
 #### Build
 ``` bash
 git clone https://github.com/Hikari03/hikup.git && \
+cd hikup && \
 cmake -B build -S . && \
 cmake --build build --target hikup-server -j $(nproc)
 ```
