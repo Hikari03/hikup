@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <condition_variable>
 #include <csignal>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <list>
@@ -8,11 +10,10 @@
 #include <vector>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <filesystem>
 
-#include "terminal.cpp"
 #include "accepter.cpp"
 #include "ConnectionServer.h"
+#include "terminal.cpp"
 #include "utilServer.cpp"
 
 sig_atomic_t stopRequested = 0;
