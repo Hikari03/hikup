@@ -65,7 +65,7 @@ void ConnectionServer::initEncryption () {
 	_encrypted = true;
 }
 
-void ConnectionServer::clearBuffer () { memset(_buffer, '\0', 4096); }
+void ConnectionServer::clearBuffer () { memset(_buffer, '\0', _sizeOfPreviousMessage); }
 
 std::string ConnectionServer::receive () {
 	_message.clear();
