@@ -52,6 +52,9 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 		uploadSpeed = static_cast<double>(sizeUploaded) / totalTimeUpload;
 
+		if ( connection.receiveInternal() != "confirm" )
+			throw std::runtime_error("Server did not confirm the chunk");
+
 		std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
 				colorize(humanReadableSize(( i + 1 ) * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) +
 				colorize(humanReadableSize(( totalChunks + 1 ) * chunkSize), Color::CYAN) + colorize(
@@ -68,6 +71,9 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 			colorize(humanReadableSize(totalChunks * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) + colorize(
 				humanReadableSize(totalChunks * chunkSize),
 				Color::CYAN) + colorize(" (100 %)  ", Color::PURPLE) << std::endl;
+
+	if ( connection.receiveInternal() != "confirm" )
+		throw std::runtime_error("Server did not confirm the chunk");
 
 	connection.sendInternal("DONE");
 	auto hash = connection.receiveInternal();
@@ -91,7 +97,6 @@ void downloadFile ( Connection& connection ) {
 	std::ofstream file(fileName, std::ios::binary);
 
 	while ( true ) {
-
 		auto [chunk,duration] = connection.receiveWTime();
 
 		if ( chunk == _internal"DONE" )
@@ -112,6 +117,8 @@ void downloadFile ( Connection& connection ) {
 		totalTimeWrite += duration.count();
 
 		auto writeSpeed = static_cast<double>(sizeWritten) / totalTimeWrite;
+
+		connection.sendInternal("confirm");
 
 		std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) <<
 				colorize(humanReadableSize(sizeWritten), Color::CYAN) << colorize("/", Color::BLUE) <<
