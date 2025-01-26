@@ -32,7 +32,7 @@ public:
 	std::string receiveData ();
 
 private:
-	char _buffer[4096] = {0};
+	char _buffer[256*1024+1] = {0};
 	std::vector<std::string> _messagesBuffer;
 	ClientInfo _clientInfo;
 

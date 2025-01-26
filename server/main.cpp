@@ -78,6 +78,8 @@ void receiveFile ( ConnectionServer& connection ) {
 		file.write(message.c_str(), message.size());
 		sizeWritten += message.size();
 
+		connection.sendInternal("confirm");
+
 		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.c_str()), message.size());
 
 		std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(size) <<
@@ -123,7 +125,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 
 	auto fileSize = std::filesystem::file_size(fileName);
 
-	constexpr size_t chunkSize = 128 * 1024;
+	constexpr size_t chunkSize = 1024 * 1024;
 	auto buffer = std::make_unique<char[]>(chunkSize);
 
 	const unsigned long long totalChunks = fileSize / chunkSize + 1;
@@ -139,10 +141,14 @@ void sendFile ( ConnectionServer& connectionServer ) {
 	for ( unsigned long long i = 0; i < totalChunks - 1; ++i ) {
 		file.read(buffer.get(), chunkSize);
 		connectionServer.send(std::string(buffer.get(), chunkSize));
+		if ( connectionServer.receiveInternal() != "confirm" )
+			throw std::runtime_error("main: client did not confirm the chunk");
 	}
 
 	file.read(buffer.get(), static_cast<std::streamsize>(lastChunkSize));
 	connectionServer.send(std::string(buffer.get(), lastChunkSize));
+	if ( connectionServer.receiveInternal() != "confirm" )
+		throw std::runtime_error("main: client did not confirm the chunk");
 
 	connectionServer.sendInternal("DONE");
 }
