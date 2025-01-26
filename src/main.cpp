@@ -11,7 +11,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 	}
 
 	// we will send the file in chunks of 128KB
-	constexpr size_t chunkSize = 128 * 1000;
+	constexpr size_t chunkSize = 256 * 1024;
 	auto buffer = std::make_unique<char[]>(chunkSize);
 
 	const unsigned long long totalChunks = fileSize / chunkSize + 1;

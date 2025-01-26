@@ -70,7 +70,7 @@ private:
 		unsigned char secretKey[crypto_box_SECRETKEYBYTES];
 	};
 
-	char _buffer[4097] = {};
+	char _buffer[1024*256+1] = {};
 	std::vector<std::string> _messagesBuffer;
 	KeyPair _keyPair;
 	unsigned char _remotePublicKey[crypto_box_PUBLICKEYBYTES];

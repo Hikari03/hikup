@@ -82,7 +82,7 @@ std::string ConnectionServer::receive () {
 		//std::cout << "RECEIVE BUFFER BEFORE CLEAR|  " << _clientInfo.socket_ << ": " << _buffer << std::endl;
 		clearBuffer();
 
-		_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer, 4092, 0);
+		_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer, 256*1024, 0);
 
 
 		if ( _sizeOfPreviousMessage < 0 ) {
