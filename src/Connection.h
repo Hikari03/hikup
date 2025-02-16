@@ -54,13 +54,21 @@ public:
 
 	void sendInternal ( const std::string& message );
 
+	void rawSendInit ( int64_t expectedSize );
+
+	void rawSend ( const std::string& message, int64_t chunkSize = 1024 * 256 );
+
+	void rawSendClose ();
+
 	std::string receive ();
 
-	std::tuple<std::string, std::chrono::duration<double>> receiveWTime();
+	std::tuple<std::string, std::chrono::duration<double>> receiveWTime ();
 
 	std::string receiveInternal ();
 
 	std::string receiveData ();
+
+	std::string receiveRaw ( bool chunked );
 
 	void close ();
 
@@ -70,8 +78,9 @@ private:
 		unsigned char secretKey[crypto_box_SECRETKEYBYTES];
 	};
 
-	char _buffer[1024*256+1] = {};
+	char _buffer[1024 * 256 + 1] = {};
 	std::vector<std::string> _messagesBuffer;
+	std::string _rawModeBuffer;
 	KeyPair _keyPair;
 	unsigned char _remotePublicKey[crypto_box_PUBLICKEYBYTES];
 	std::mutex _sendMutex;
@@ -91,6 +100,8 @@ private:
 	bool _active = true;
 	bool _encrypted = false;
 	bool _moreInBuffer = false;
+	bool _rawSendOut = false;
+	bool _rawSendIn = false;
 
 	void clearBuffer ();
 
@@ -98,9 +109,17 @@ private:
 
 	void _send ( const char* message, size_t length );
 
-	std::string _receive ();
+	[[nodiscard]] std::string _receive ();
 
-	void _secretOpen ( std::string& message );
+	std::string _receiveInternal ();
 
-	void _secretSeal ( std::string& message );
+	void _sendInternal ( const std::string& message );
+
+	void _rawReceive ( int64_t size = 1024 * 256 );
+
+	std::string _receiveSize ( int64_t size );
+
+	void _secretOpen ( std::string& message ) const;
+
+	void _secretSeal ( std::string& message ) const;
 };

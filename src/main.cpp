@@ -24,6 +24,8 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 	long long sizeRead = 0;
 	unsigned long long sizeUploaded = 0;
 
+	connection.rawSendInit(chunkSize);
+
 	std::cout << colorize("Starting upload of size: ", Color::BLUE) << colorize(
 		humanReadableSize(fileSize), Color::CYAN) << "\n" << std::endl;
 
@@ -41,7 +43,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 		auto startUploadTime = std::chrono::high_resolution_clock::now();
 
-		connection.send(std::string(buffer.get(), chunkSize));
+		connection.rawSend(std::string(buffer.get(), chunkSize), chunkSize*50);
 
 		auto endUploadTime = std::chrono::high_resolution_clock::now();
 
@@ -51,9 +53,6 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		sizeUploaded += chunkSize;
 
 		uploadSpeed = static_cast<double>(sizeUploaded) / totalTimeUpload;
-
-		if ( connection.receiveInternal() != "confirm" )
-			throw std::runtime_error("Server did not confirm the chunk");
 
 		std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
 				colorize(humanReadableSize(( i + 1 ) * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) +
@@ -66,16 +65,14 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 	}
 
 	file.read(buffer.get(), static_cast<std::streamsize>(lastChunkSize));
-	connection.send(std::string(buffer.get(), lastChunkSize));
+	connection.rawSend(std::string(buffer.get(), lastChunkSize), lastChunkSize);
+	connection.rawSendClose();
 	std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
 			colorize(humanReadableSize(totalChunks * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) + colorize(
 				humanReadableSize(totalChunks * chunkSize),
 				Color::CYAN) + colorize(" (100 %)  ", Color::PURPLE) << std::endl;
 
-	if ( connection.receiveInternal() != "confirm" )
-		throw std::runtime_error("Server did not confirm the chunk");
 
-	connection.sendInternal("DONE");
 	auto hash = connection.receiveInternal();
 	std::cout << colorize("File uploaded successfully with hash: ", Color::GREEN) + colorize(hash, Color::CYAN) <<
 			std::endl;

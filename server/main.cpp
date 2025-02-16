@@ -38,7 +38,7 @@ void receiveFile ( ConnectionServer& connection ) {
 	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
 
 	// convert all '.' to '$' in the filename
-	std::replace(fileName.begin(), fileName.end(), '.', '<');
+	std::ranges::replace(fileName, '.', '<');
 
 	std::filesystem::path _path = std::filesystem::absolute(fileName + '.' + hashFromClient);
 
@@ -64,7 +64,16 @@ void receiveFile ( ConnectionServer& connection ) {
 	crypto_generichash_init(&state, nullptr, 0, sizeof hash);
 
 	while ( true ) {
-		try { message = connection.receive(); }
+		try {
+			if (size > 1024 * 256) {
+				message = connection.receiveRaw(true);
+				if (message == "")
+					break;
+			}
+			else {
+				message = connection.receiveRaw(false);
+			}
+		}
 		catch ( const std::exception& e ) {
 			std::cerr << "main: error receiving message: " << e.what() << std::endl;
 			file.close();
@@ -72,18 +81,15 @@ void receiveFile ( ConnectionServer& connection ) {
 			return;
 		}
 
-		if ( message.starts_with(_internal"DONE") )
-			break;
-
 		file.write(message.c_str(), message.size());
 		sizeWritten += message.size();
 
-		connection.sendInternal("confirm");
-
 		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.c_str()), message.size());
 
-		std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(size) <<
-				" bytes written" << std::flush;
+		/*std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(size) <<
+				" bytes written" << std::flush;*/
+
+		if (size <= 1024 * 256) break;
 	}
 	std::cout << std::endl;
 	file.close();
@@ -134,7 +140,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 	connectionServer.sendInternal(std::to_string(fileSize));
 
 	auto clientFileName = fileName.substr(0, fileName.find_last_of('.'));
-	std::replace(clientFileName.begin(), clientFileName.end(), '<', '.');
+	std::ranges::replace(clientFileName, '<', '.');
 
 	connectionServer.sendInternal(clientFileName);
 

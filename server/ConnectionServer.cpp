@@ -67,6 +67,32 @@ void ConnectionServer::initEncryption () {
 
 void ConnectionServer::clearBuffer () { memset(_buffer, '\0', _sizeOfPreviousMessage); }
 
+void ConnectionServer::_send ( const std::string& messageToSend ) const {
+	if ( ::send(_clientInfo.socket_, messageToSend.c_str(), messageToSend.length(), 0) < 0 ) {
+		throw std::runtime_error("Could not send message to client");
+	}
+}
+
+std::string ConnectionServer::_receive () {
+	std::string message;
+
+	while ( !message.ends_with(_end) ) {
+		_rawReceive();
+		message += _buffer;
+	}
+
+	return message;
+}
+
+std::string ConnectionServer::_receiveInternal () {
+	const auto message = receive();
+
+	if ( !message.contains(_internal) )
+		throw std::runtime_error("Invalid message received (internal)");
+
+	return message.substr(strlen(_internal));
+}
+
 std::string ConnectionServer::receive () {
 	_message.clear();
 
@@ -78,25 +104,7 @@ std::string ConnectionServer::receive () {
 		return _message;
 	}
 
-	while ( !_message.ends_with(_end) ) {
-		//std::cout << "RECEIVE BUFFER BEFORE CLEAR|  " << _clientInfo.socket_ << ": " << _buffer << std::endl;
-		clearBuffer();
-
-		_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer, 256*1024, 0);
-
-
-		if ( _sizeOfPreviousMessage < 0 ) {
-			if ( errno != EAGAIN && errno != EWOULDBLOCK )
-				throw std::runtime_error("client disconnected or could not receive message");
-
-			if ( errno == EAGAIN || errno == EWOULDBLOCK )
-				throw std::runtime_error("timeout");
-		}
-
-		_message += _buffer;
-
-		//std::cout << "RECEIVE |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << _message << std::endl;
-	}
+	_message = _receive();
 
 	//std::cout << "RECEIVE |  " << _clientInfo.socket_ << ": " << _message << std::endl;
 
@@ -137,12 +145,55 @@ std::string ConnectionServer::receive () {
 }
 
 std::string ConnectionServer::receiveInternal () {
-	const auto message = receive();
+	if ( _rawSendIn )
+		throw std::runtime_error("Cannot receive formatted data in raw mode");
 
-	if ( !message.contains(_internal) )
-		throw std::runtime_error("Invalid message received (internal): " + message);
+	return _receiveInternal();
+}
 
-	return message.substr(strlen(_internal));
+void ConnectionServer::rawSendInit ( const int64_t expectedSize = 1024 ) {
+	sendInternal("RAWSEND_INIT");
+	if ( receiveInternal() != "RAWSEND_CONFIRM" )
+		throw std::runtime_error("Could not initialize raw send");
+
+	_rawModeBuffer.clear();
+	_rawModeBuffer.reserve(expectedSize);
+
+	_rawSendOut = true;
+}
+
+void ConnectionServer::rawSend ( std::string& message, const int64_t chunkSize = 1024 ) {
+	if ( !_rawSendOut )
+		throw std::runtime_error("Raw send not initialized");
+
+	auto internalString = message;
+
+	secretSeal(internalString);
+
+	_rawModeBuffer += internalString;
+
+	if ( _rawModeBuffer.size() >= static_cast<std::string::size_type>(chunkSize) ) {
+		_sendInternal(std::to_string(_rawModeBuffer.size()));
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		_send(_rawModeBuffer);
+		_rawModeBuffer.clear();
+	}
+}
+
+void ConnectionServer::rawSendClose () {
+	if ( !_rawSendOut )
+		throw std::runtime_error("Raw send not initialized");
+
+	if ( !_rawModeBuffer.empty() ) {
+		_sendInternal(std::to_string(_rawModeBuffer.size()));
+		_send(_rawModeBuffer);
+	}
+
+	_sendInternal("RAWSEND_CLOSE");
+	if ( _receiveInternal() != "RAWSEND_CONFIRM" )
+		throw std::runtime_error("Could not close raw send");
+
+	_rawSendOut = false;
 }
 
 std::string ConnectionServer::receiveData () {
@@ -154,7 +205,46 @@ std::string ConnectionServer::receiveData () {
 	return message.substr(strlen(_data));
 }
 
-void ConnectionServer::send ( const std::string& message ) {
+std::string ConnectionServer::receiveRaw ( const bool chunked ) {
+	if ( !_rawSendIn ) {
+		if ( _receiveInternal() != "RAWSEND_INIT" )
+			throw std::runtime_error("Could not initialize raw receive");
+
+		_sendInternal("RAWSEND_CONFIRM");
+
+		_rawSendIn = true;
+	}
+
+	std::string message, internal;
+
+	if ( chunked ) {
+		internal = _receiveInternal();
+
+		if ( internal == "RAWSEND_CLOSE" ) {
+			std::cout << "RAWSEND_CLOSE" << std::endl;
+			_sendInternal("RAWSEND_CONFIRM");
+			_rawSendIn = false;
+			return "";
+		}
+
+		//std::cout << "expected size: " << internal << std::endl;
+
+		message = _receiveSize(std::stoi(internal));
+	}
+	else {
+		while ( internal != "RAWSEND_CLOSE" ) {
+			message += _receiveSize(std::stoi(internal));
+			internal = _receiveInternal();
+		}
+
+		_sendInternal("RAWSEND_CONFIRM");
+		_rawSendIn = false;
+	}
+
+	return message;
+}
+
+void ConnectionServer::send ( const std::string& message ) const {
 	auto messageToSend = message;
 
 	//std::cout << "SEND1 |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
@@ -165,19 +255,54 @@ void ConnectionServer::send ( const std::string& message ) {
 	//std::cout << "SEND2 |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
 	if ( !_active )
 		return;
-	try {
-		if ( ::send(_clientInfo.socket_, messageToSend.c_str(), messageToSend.length(), 0) < 0 ) {
-			throw std::runtime_error("Could not send message to client");
-		}
-	}
+	try { _send(messageToSend); }
 	catch ( std::exception& e ) { throw std::runtime_error("Could not send message to client"); }
 }
 
-void ConnectionServer::sendData ( const std::string& message ) { send(_data + message); }
+void ConnectionServer::sendData ( const std::string& message ) const { send(_data + message); }
 
-void ConnectionServer::sendInternal ( const std::string& message ) { send(_internal + message); }
+void ConnectionServer::sendInternal ( const std::string& message ) const {
+	if ( _rawSendOut )
+		throw std::runtime_error("Cannot send data in raw mode");
+	_sendInternal(message);
+}
 
-void ConnectionServer::secretSeal ( std::string& message ) {
+void ConnectionServer::_sendInternal ( const std::string& message ) const { send(_internal + message); }
+
+void ConnectionServer::_rawReceive ( const int64_t size ) {
+	if (size > _bufferSize)
+		throw std::runtime_error("receive size too big");
+
+	clearBuffer();
+
+	_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer, size, 0);
+
+	if ( _sizeOfPreviousMessage < 0 ) {
+		if ( errno != EAGAIN && errno != EWOULDBLOCK )
+			throw std::runtime_error("client disconnected or could not receive message: " + std::string(strerror(errno)));
+
+		if ( errno == EAGAIN || errno == EWOULDBLOCK )
+			throw std::runtime_error("timeout");
+	}
+}
+
+std::string ConnectionServer::_receiveSize ( const int64_t size ) {
+	if (size <= 0) return "";
+	std::string message;
+
+	while ( message.size() < static_cast<std::string::size_type>(size) ) {
+		_rawReceive((size - message.size()) > _bufferSize ? _bufferSize : size - message.size());
+		message += _buffer;
+	}
+
+	//std::cout << "received size: " << message.size() << std::endl;
+
+	secretOpen(message);
+
+	return message;
+}
+
+void ConnectionServer::secretSeal ( std::string& message ) const {
 	auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
 
 	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.c_str()), message.size(),
@@ -192,7 +317,7 @@ void ConnectionServer::secretSeal ( std::string& message ) {
 	message = std::string(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2);
 }
 
-void ConnectionServer::secretOpen ( std::string& message ) {
+void ConnectionServer::secretOpen ( std::string& message ) const {
 	auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
 
 	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.c_str()),

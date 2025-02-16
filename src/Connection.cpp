@@ -1,5 +1,6 @@
 #include "Connection.h"
 
+#include <algorithm>
 #include <iostream>
 
 Connection::Connection () {
@@ -88,20 +89,48 @@ void Connection::_send ( const char* message, size_t length ) {
 #endif
 }
 
+
 std::string Connection::_receive () {
 	std::string message;
 
 	while ( !message.ends_with(_end) ) {
-		clearBuffer();
-
-		_sizeOfPreviousMessage = recv(_socket, _buffer, 1024*256, 0);
-
-		if ( _sizeOfPreviousMessage < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != MSG_WAITALL ) {
-			throw std::runtime_error("Could not receive message from server: " + std::string(strerror(errno)));
-		}
-
+		_rawReceive();
 		message += _buffer;
 	}
+
+	return message;
+}
+
+std::string Connection::_receiveInternal () {
+	const auto message = receive();
+
+	if ( !message.contains(_internal) )
+		throw std::runtime_error("Invalid message received (internal)");
+
+	return message.substr(strlen(_internal));
+}
+
+void Connection::_sendInternal ( const std::string& message ) { send(_internal + message); }
+
+void Connection::_rawReceive ( const int64_t size ) {
+	clearBuffer();
+
+	_sizeOfPreviousMessage = recv(_socket, _buffer, size, 0);
+
+	if ( _sizeOfPreviousMessage < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != MSG_WAITALL ) {
+		throw std::runtime_error("Could not receive message from server: " + std::string(strerror(errno)));
+	}
+}
+
+std::string Connection::_receiveSize ( const int64_t size ) {
+	std::string message;
+
+	while ( message.size() < static_cast<std::string::size_type>(size) ) {
+		_rawReceive(size - message.size());
+		message += _buffer;
+	}
+
+	_secretOpen(message);
 
 	return message;
 }
@@ -116,7 +145,7 @@ void Connection::send ( const std::string& message ) {
 	if ( _encrypted )
 		_secretSeal(messageToSend);
 
-	if (messageToSend.size() % 2 != 0)
+	if ( messageToSend.size() % 2 != 0 )
 		throw std::runtime_error("Invalid message to send");
 
 	messageToSend += _end;
@@ -126,11 +155,65 @@ void Connection::send ( const std::string& message ) {
 	_send(messageToSend.c_str(), messageToSend.size());
 }
 
-void Connection::sendData ( const std::string& message ) { send(_data + message); }
+void Connection::sendData ( const std::string& message ) {
+	if ( _rawSendOut )
+		throw std::runtime_error("Cannot send data in raw mode");
+	send(_data + message);
+}
 
-void Connection::sendInternal ( const std::string& message ) { send(_internal + message); }
+void Connection::sendInternal ( const std::string& message ) {
+	if ( _rawSendOut )
+		throw std::runtime_error("Cannot send data in raw mode");
+	_sendInternal(message);
+}
+
+void Connection::rawSendInit ( const int64_t expectedSize = 1024 ) {
+	sendInternal("RAWSEND_INIT");
+	if ( receiveInternal() != "RAWSEND_CONFIRM" )
+		throw std::runtime_error("Could not initialize raw send");
+
+	_rawModeBuffer.clear();
+	_rawModeBuffer.reserve(expectedSize);
+
+	_rawSendOut = true;
+}
+
+void Connection::rawSend (const std::string& message, const int64_t chunkSize ) {
+	if ( !_rawSendOut )
+		throw std::runtime_error("Raw send not initialized");
+
+	_rawModeBuffer += message;
+
+	if ( _rawModeBuffer.size() >= static_cast<std::string::size_type>(chunkSize) ) {
+		_secretSeal(_rawModeBuffer);
+		_sendInternal(std::to_string(_rawModeBuffer.size()));
+		std::this_thread::sleep_for(std::chrono::milliseconds(200)); // TODO: hate this
+		_send(_rawModeBuffer.c_str(), _rawModeBuffer.size());
+		_rawModeBuffer.clear();
+	}
+}
+
+void Connection::rawSendClose () {
+	if ( !_rawSendOut )
+		throw std::runtime_error("Raw send not initialized");
+
+	if ( !_rawModeBuffer.empty() ) {
+		_sendInternal(std::to_string(_rawModeBuffer.size()));
+		_send(_rawModeBuffer.c_str(), _rawModeBuffer.size());
+	}
+
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+
+	_sendInternal("RAWSEND_CLOSE");
+	if ( _receiveInternal() != "RAWSEND_CONFIRM" )
+		throw std::runtime_error("Could not close raw send");
+
+	_rawSendOut = false;
+}
 
 std::string Connection::receive () {
+	if ( _rawSendIn )
+		throw std::runtime_error("Cannot receive formatted data in raw mode");
 
 	if ( _moreInBuffer ) {
 		auto message = _messagesBuffer[0];
@@ -151,11 +234,11 @@ std::string Connection::receive () {
 
 	while ( ( ePos = message.find(_end, sPos) ) != std::string::npos ) {
 		if ( first ) {
-			tmpMessage = message.substr(sPos, ePos-sPos);
+			tmpMessage = message.substr(sPos, ePos - sPos);
 			first = false;
 		}
 		else
-			messages.push_back(message.substr(sPos, ePos-sPos));
+			messages.push_back(message.substr(sPos, ePos - sPos));
 
 
 		sPos = ePos + strlen(_end);
@@ -208,7 +291,6 @@ std::string Connection::receive () {
 }
 
 std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime () {
-
 	if ( _moreInBuffer ) {
 		auto message = _messagesBuffer[0];
 		_messagesBuffer.erase(_messagesBuffer.begin());
@@ -230,11 +312,11 @@ std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime 
 
 	while ( ( ePos = message.find(_end, sPos) ) != std::string::npos ) {
 		if ( first ) {
-			tmpMessage = message.substr(sPos, ePos-sPos);
+			tmpMessage = message.substr(sPos, ePos - sPos);
 			first = false;
 		}
 		else
-			messages.push_back(message.substr(sPos, ePos-sPos));
+			messages.push_back(message.substr(sPos, ePos - sPos));
 
 
 		sPos = ePos + strlen(_end);
@@ -270,7 +352,7 @@ std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime 
 		std::string publicKey = message.substr(strlen(_internal"publicKey:"));
 
 		if ( sodium_hex2bin(_remotePublicKey, crypto_box_PUBLICKEYBYTES, publicKey.c_str(), publicKey.size(), nullptr,
-							nullptr, nullptr) < 0 ) { throw std::runtime_error("Could not decode public key"); }
+		                    nullptr, nullptr) < 0 ) { throw std::runtime_error("Could not decode public key"); }
 
 		auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
 
@@ -287,12 +369,10 @@ std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime 
 }
 
 std::string Connection::receiveInternal () {
-	const auto message = receive();
+	if ( _rawSendIn )
+		throw std::runtime_error("Cannot receive formatted data in raw mode");
 
-	if ( !message.contains(_internal) )
-		throw std::runtime_error("Invalid message received (internal)");
-
-	return message.substr(strlen(_internal));
+	return _receiveInternal();
 }
 
 std::string Connection::receiveData () {
@@ -302,6 +382,39 @@ std::string Connection::receiveData () {
 		throw std::runtime_error("Invalid message received (data)");
 
 	return message.substr(strlen(_data));
+}
+
+std::string Connection::receiveRaw ( const bool chunked ) {
+	if ( !_rawSendIn ) {
+		if ( _receiveInternal() != "RAWSEND_INIT" )
+			throw std::runtime_error("Could not initialize raw receive");
+
+		_sendInternal("RAWSEND_CONFIRM");
+
+		_rawSendIn = true;
+	}
+
+	std::string message, internal;
+
+	if ( chunked ) {
+		internal = _receiveInternal();
+
+		if ( internal == "RAWSEND_CLOSE" ) {
+			_sendInternal("RAWSEND_CONFIRM");
+			_rawSendIn = false;
+			return "";
+		}
+
+		message = _receiveSize(std::stoi(internal));
+	}
+	else {
+		while ( internal != "RAWSEND_CLOSE" ) { message += _receiveSize(std::stoi(internal)); }
+
+		_sendInternal("RAWSEND_CONFIRM");
+		_rawSendIn = false;
+	}
+
+	return message;
 }
 
 void Connection::close () {
@@ -366,7 +479,7 @@ std::vector<std::string> Connection::dnsLookup ( const std::string& domain, int 
 	return output;
 }
 
-void Connection::_secretSeal ( std::string& message ) {
+void Connection::_secretSeal ( std::string& message ) const { // TODO: do we have to make hex?
 	auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
 
 	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.c_str()), message.size(),
@@ -381,9 +494,8 @@ void Connection::_secretSeal ( std::string& message ) {
 	message = std::string(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2);
 }
 
-void Connection::_secretOpen ( std::string& message ) {
-
-	if (message.length() % 2 != 0)
+void Connection::_secretOpen ( std::string& message ) const {
+	if ( message.length() % 2 != 0 )
 		throw std::runtime_error("Invalid message to decrypt: " + message);
 
 	auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
