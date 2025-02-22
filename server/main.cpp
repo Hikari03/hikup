@@ -37,6 +37,12 @@ void receiveFile ( ConnectionServer& connection ) {
 	auto fileName = connection.receiveInternal().substr(strlen("filename:"));
 	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
 
+#ifdef HIKUP_DEBUG
+	std::cout << "main: file name: " << fileName << std::endl;
+	std::cout << "main: file size: " << size << std::endl;
+	std::cout << "main: file hash: " << hashFromClient << std::endl;
+#endif
+
 	// convert all '.' to '$' in the filename
 	std::ranges::replace(fileName, '.', '<');
 

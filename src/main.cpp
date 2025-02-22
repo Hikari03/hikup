@@ -56,7 +56,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 		std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
 				colorize(humanReadableSize(( i + 1 ) * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) +
-				colorize(humanReadableSize(( totalChunks + 1 ) * chunkSize), Color::CYAN) + colorize(
+				colorize(humanReadableSize(totalChunks * chunkSize + lastChunkSize), Color::CYAN) + colorize(
 					std::string(" (") +
 					std::to_string(( static_cast<double>(i + 1) / static_cast<double>(totalChunks) ) * 100.0).
 					substr(0, 5) + " %)",

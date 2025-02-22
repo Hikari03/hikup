@@ -106,7 +106,9 @@ std::string ConnectionServer::receive () {
 
 	_message = _receive();
 
-	//std::cout << "RECEIVE |  " << _clientInfo.socket_ << ": " << _message << std::endl;
+#ifdef HIKUP_DEBUG
+	std::cout << "RECEIVE |  " << _clientInfo.socket_ << ": " << _message << std::endl;
+#endif
 
 	// cut off the _end
 
@@ -270,7 +272,7 @@ void ConnectionServer::sendInternal ( const std::string& message ) const {
 void ConnectionServer::_sendInternal ( const std::string& message ) const { send(_internal + message); }
 
 void ConnectionServer::_rawReceive ( const int64_t size ) {
-	if (size > _bufferSize)
+	if ( size > _bufferSize )
 		throw std::runtime_error("receive size too big");
 
 	clearBuffer();
@@ -279,7 +281,8 @@ void ConnectionServer::_rawReceive ( const int64_t size ) {
 
 	if ( _sizeOfPreviousMessage < 0 ) {
 		if ( errno != EAGAIN && errno != EWOULDBLOCK )
-			throw std::runtime_error("client disconnected or could not receive message: " + std::string(strerror(errno)));
+			throw std::runtime_error(
+				"client disconnected or could not receive message: " + std::string(strerror(errno)));
 
 		if ( errno == EAGAIN || errno == EWOULDBLOCK )
 			throw std::runtime_error("timeout");
@@ -287,11 +290,12 @@ void ConnectionServer::_rawReceive ( const int64_t size ) {
 }
 
 std::string ConnectionServer::_receiveSize ( const int64_t size ) {
-	if (size <= 0) return "";
+	if ( size <= 0 )
+		return "";
 	std::string message;
 
 	while ( message.size() < static_cast<std::string::size_type>(size) ) {
-		_rawReceive((size - message.size()) > _bufferSize ? _bufferSize : size - message.size());
+		_rawReceive(( size - message.size() ) > _bufferSize ? _bufferSize : size - message.size());
 		message += _buffer;
 	}
 
@@ -303,32 +307,42 @@ std::string ConnectionServer::_receiveSize ( const int64_t size ) {
 }
 
 void ConnectionServer::secretSeal ( std::string& message ) const {
-	auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
+	const auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
 
 	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.c_str()), message.size(),
 	                     _remotePublicKey) < 0 )
 		throw std::runtime_error("Could not encrypt message");
 
-	auto messageHex = std::make_unique<unsigned char[]>(( crypto_box_SEALBYTES + message.size() ) * 2 + 1);
+	const auto sodiumMaxEncodedLen = sodium_base64_ENCODED_LEN(crypto_box_SEALBYTES + message.size(),
+	                                                           sodium_base64_VARIANT_ORIGINAL);
+	const auto base64 = std::make_unique<char[]>(sodiumMaxEncodedLen);
 
-	sodium_bin2hex(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2 + 1,
-	               cypherText.get(), crypto_box_SEALBYTES + message.size());
+	sodium_bin2base64(base64.get(), sodiumMaxEncodedLen, cypherText.get(), crypto_box_SEALBYTES + message.size(),
+	                  sodium_base64_VARIANT_ORIGINAL);
 
-	message = std::string(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2);
+	message = std::string(reinterpret_cast<char*>(cypherText.get()), sodiumMaxEncodedLen);
+#ifdef HIKUP_DEBUG
+	std::cout << "SEAL (enc)| " << message << std::endl;
+#endif
 }
 
 void ConnectionServer::secretOpen ( std::string& message ) const {
-	auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
+	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 4 * 3);
+	size_t binLen = 0;
 
-	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.c_str()),
-	                    message.size(), nullptr, nullptr, nullptr) < 0 )
-		throw std::runtime_error("Could not decode message");
+	if ( sodium_base642bin(cypherTextBin.get(), message.size() / 4 * 3, message.c_str(), message.size(), nullptr,
+	                       &binLen, nullptr, sodium_base64_VARIANT_ORIGINAL) < 0 )
+		throw std::runtime_error(
+			"Could not decode message: more than bin_maxlen bytes are be required to store the parsed string or the string couldn’t be fully parsed, but a valid pointer for b64_end was not provided.");
 
-	auto decrypted = std::make_unique<unsigned char[]>(message.size() / 2 - crypto_box_SEALBYTES);
+	const auto decrypted = std::make_unique<unsigned char[]>(message.size() - crypto_box_SEALBYTES);
 
-	if ( crypto_box_seal_open(decrypted.get(), cypherTextBin.get(), message.size() / 2, _keyPair.publicKey,
+	if ( crypto_box_seal_open(decrypted.get(), cypherTextBin.get(), binLen, _keyPair.publicKey,
 	                          _keyPair.secretKey) < 0 )
 		throw std::runtime_error("Could not decrypt message");
 
-	message = std::string(reinterpret_cast<char*>(decrypted.get()), message.size() / 2 - crypto_box_SEALBYTES);
+	message = std::string(reinterpret_cast<char*>(decrypted.get()), binLen - crypto_box_SEALBYTES);
+#ifdef HIKUP_DEBUG
+	std::cout << "OPEN (dec)| " << message << std::endl;
+#endif
 }
