@@ -4,15 +4,18 @@
 #include "Connection.h"
 #include "util.cpp"
 
-void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection ) {
+void sendFile ( std::ifstream& file,
+                const std::ifstream::pos_type fileSize,
+                Connection& connection) {
 	if ( !file.good() ) {
 		std::cerr << colorize("Could not open file", Color::RED) << std::endl;
 		return;
 	}
 
-	// we will send the file in chunks of 128KB
-	constexpr size_t chunkSize = 256 * 1024;
-	auto buffer = std::make_unique<char[]>(chunkSize);
+	size_t chunkSize = 256 * 1024;
+	constexpr size_t maxChunkSize = 1024 * 1024; // 1 MB
+	// constexpr size_t minChunkSize = 1024; // 1 KB
+	const auto buffer = std::make_unique<char[]>(maxChunkSize+1);
 
 	const unsigned long long totalChunks = fileSize / chunkSize + 1;
 	const size_t lastChunkSize = fileSize % chunkSize;
@@ -24,7 +27,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 	long long sizeRead = 0;
 	unsigned long long sizeUploaded = 0;
 
-	connection.rawSendInit(chunkSize);
+	connection.rawSendInit(maxChunkSize);
 
 	std::cout << colorize("Starting upload of size: ", Color::BLUE) << colorize(
 		humanReadableSize(fileSize), Color::CYAN) << "\n" << std::endl;
@@ -43,7 +46,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 
 		auto startUploadTime = std::chrono::high_resolution_clock::now();
 
-		connection.rawSend(std::string(buffer.get(), chunkSize), chunkSize*50);
+		connection.rawSend(std::string(buffer.get(), chunkSize), chunkSize * 50);
 
 		auto endUploadTime = std::chrono::high_resolution_clock::now();
 
@@ -62,10 +65,20 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 					substr(0, 5) + " %)",
 					Color::PURPLE) + " ┃ " + colorize("Read: " + humanReadableSpeed(readSpeed), Color::LL_BLUE) + " ━━ "
 				+ colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
+
+		// if upload of chunk takes less than 0.5 seconds => make chunk size bigger
+		/*if ( duration.count() < 0.5 && chunkSize < maxChunkSize )
+			if ( chunkSize * 1.2 < maxChunkSize )
+				chunkSize *= 1.2;
+			else
+				chunkSize = maxChunkSize;
+		else if ( duration.count() > 1.0 && chunkSize > minChunkSize )
+			chunkSize /= 1.2;*/
+
 	}
 
 	file.read(buffer.get(), static_cast<std::streamsize>(lastChunkSize));
-	connection.rawSend(std::string(buffer.get(), lastChunkSize), lastChunkSize);
+	connection.rawSend(std::string(buffer.get(), lastChunkSize), static_cast<long>(lastChunkSize));
 	connection.rawSendClose();
 	std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
 			colorize(humanReadableSize(totalChunks * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) + colorize(
@@ -73,7 +86,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 				Color::CYAN) + colorize(" (100 %)  ", Color::PURPLE) << std::endl;
 
 
-	auto hash = connection.receiveInternal();
+	const auto hash = connection.receiveInternal();
 	std::cout << colorize("File uploaded successfully with hash: ", Color::GREEN) + colorize(hash, Color::CYAN) <<
 			std::endl;
 }
@@ -132,7 +145,8 @@ void downloadFile ( Connection& connection ) {
 
 int main ( int argc, char* argv[] ) {
 	if ( argc < 4 ) {
-		std::cout << "Usage: " << argv[0] << " <up <file> | down <hash> | rm <hash>> <server> \n\n"
+		std::cout << "Usage: " << argv[0] << "<up <file> | down <hash> | rm <hash>> <server> [-c] \n\n"
+				"-c: Do not load full file into memory, read and send it in chunks\n"
 				"If file is successfully uploaded, you will get file hash\n"
 				"which you need to input if you want to download it" << std::endl;
 		return 1;
@@ -159,6 +173,17 @@ int main ( int argc, char* argv[] ) {
 		std::cerr << colorize(e.what(), Color::RED) << std::endl;
 		return 1;
 	}
+
+	bool useChunks = false;
+
+	if ( argc == 5 && std::string(argv[4]) == "-c" ) {
+		useChunks = true;
+		std::cout << colorize("Using chunks for file transfer", Color::LL_BLUE) << std::endl;
+	}
+	else
+		std::cout << colorize("Using full file transfer", Color::LL_BLUE) << std::endl;
+
+	std::cout << useChunks << std::endl;
 
 	std::string hash;
 

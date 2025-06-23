@@ -16,8 +16,8 @@ ConnectionServer::~ConnectionServer () {
 }
 
 void ConnectionServer::init () {
-	struct timeval timeout;
-	timeout.tv_sec = 5; // Timeout in seconds
+	timeval timeout{};
+	timeout.tv_sec = 20; // Timeout in seconds
 	timeout.tv_usec = 0; // Timeout in microseconds
 
 	if ( setsockopt(_clientInfo.socket_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
@@ -37,7 +37,7 @@ void ConnectionServer::initEncryption () {
 	if ( crypto_box_keypair(_keyPair.publicKey, _keyPair.secretKey) < 0 )
 		throw std::runtime_error("Could not generate keypair");
 
-	auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
+	const auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
 
 	sodium_bin2hex(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2 + 1, _keyPair.publicKey, crypto_box_PUBLICKEYBYTES);
 
@@ -52,7 +52,7 @@ void ConnectionServer::initEncryption () {
 	if ( !_message.contains(_internal"publicKey:") )
 		throw std::runtime_error("Could not receive pubKey");
 
-	auto pubKey_hex = _message.substr(strlen(_internal"publicKey:"));
+	const auto pubKey_hex = _message.substr(strlen(_internal"publicKey:"));
 
 	if ( sodium_hex2bin(_remotePublicKey, crypto_box_PUBLICKEYBYTES, pubKey_hex.c_str(), pubKey_hex.size(), nullptr,
 	                    nullptr, nullptr) < 0 ) { throw std::runtime_error("Could not decode public key"); }
@@ -87,8 +87,10 @@ std::string ConnectionServer::_receive () {
 std::string ConnectionServer::_receiveInternal () {
 	const auto message = receive();
 
-	if ( !message.contains(_internal) )
-		throw std::runtime_error("Invalid message received (internal)");
+	if ( !message.contains(_internal) ) {
+		_messagesBuffer.emplace(_messagesBuffer.begin(), message);
+		return "";
+	}
 
 	return message.substr(strlen(_internal));
 }
@@ -231,11 +233,11 @@ std::string ConnectionServer::receiveRaw ( const bool chunked ) {
 
 		//std::cout << "expected size: " << internal << std::endl;
 
-		message = _receiveSize(std::stoi(internal));
+		message = receive();
 	}
 	else {
 		while ( internal != "RAWSEND_CLOSE" ) {
-			message += _receiveSize(std::stoi(internal));
+			message += receive();
 			internal = _receiveInternal();
 		}
 
@@ -249,12 +251,17 @@ std::string ConnectionServer::receiveRaw ( const bool chunked ) {
 void ConnectionServer::send ( const std::string& message ) const {
 	auto messageToSend = message;
 
-	//std::cout << "SEND1 |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
+#ifdef HIKUP_DEBUG
+	std::cout << "SEND1 |  " << _clientInfo.socket_  << ": " << messageToSend << std::endl;
+#endif
 
 	if ( _encrypted ) { secretSeal(messageToSend); }
 	messageToSend += _end;
 
-	//std::cout << "SEND2 |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
+#ifdef HIKUP_DEBUG
+	std::cout << "SEND2 |  " << _clientInfo.socket_  << ": " << messageToSend << std::endl;
+#endif
+
 	if ( !_active )
 		return;
 	try { _send(messageToSend); }
@@ -313,35 +320,31 @@ void ConnectionServer::secretSeal ( std::string& message ) const {
 	                     _remotePublicKey) < 0 )
 		throw std::runtime_error("Could not encrypt message");
 
-	const auto sodiumMaxEncodedLen = sodium_base64_ENCODED_LEN(crypto_box_SEALBYTES + message.size(),
-	                                                           sodium_base64_VARIANT_ORIGINAL);
-	const auto base64 = std::make_unique<char[]>(sodiumMaxEncodedLen);
+	const auto messageHex = std::make_unique<unsigned char[]>(( crypto_box_SEALBYTES + message.size() ) * 2 + 1);
 
-	sodium_bin2base64(base64.get(), sodiumMaxEncodedLen, cypherText.get(), crypto_box_SEALBYTES + message.size(),
-	                  sodium_base64_VARIANT_ORIGINAL);
+	sodium_bin2hex(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2 + 1,
+	               cypherText.get(), crypto_box_SEALBYTES + message.size());
 
-	message = std::string(reinterpret_cast<char*>(cypherText.get()), sodiumMaxEncodedLen);
+	message = std::string(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2);
 #ifdef HIKUP_DEBUG
 	std::cout << "SEAL (enc)| " << message << std::endl;
 #endif
 }
 
 void ConnectionServer::secretOpen ( std::string& message ) const {
-	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 4 * 3);
-	size_t binLen = 0;
+	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
 
-	if ( sodium_base642bin(cypherTextBin.get(), message.size() / 4 * 3, message.c_str(), message.size(), nullptr,
-	                       &binLen, nullptr, sodium_base64_VARIANT_ORIGINAL) < 0 )
-		throw std::runtime_error(
-			"Could not decode message: more than bin_maxlen bytes are be required to store the parsed string or the string couldn’t be fully parsed, but a valid pointer for b64_end was not provided.");
+	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, message.c_str(), message.size(), nullptr, nullptr,
+	                    nullptr) < 0 )
+		throw std::runtime_error("Could not decode message");
 
-	const auto decrypted = std::make_unique<unsigned char[]>(message.size() - crypto_box_SEALBYTES);
+	const auto decrypted = std::make_unique<unsigned char[]>(message.size() / 2 - crypto_box_SEALBYTES);
 
-	if ( crypto_box_seal_open(decrypted.get(), cypherTextBin.get(), binLen, _keyPair.publicKey,
+	if ( crypto_box_seal_open(decrypted.get(), cypherTextBin.get(), message.size() / 2, _keyPair.publicKey,
 	                          _keyPair.secretKey) < 0 )
 		throw std::runtime_error("Could not decrypt message");
 
-	message = std::string(reinterpret_cast<char*>(decrypted.get()), binLen - crypto_box_SEALBYTES);
+	message = std::string(reinterpret_cast<char*>(decrypted.get()), message.size() / 2 - crypto_box_SEALBYTES);
 #ifdef HIKUP_DEBUG
 	std::cout << "OPEN (dec)| " << message << std::endl;
 #endif

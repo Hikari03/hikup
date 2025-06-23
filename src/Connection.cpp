@@ -79,7 +79,7 @@ void Connection::connectToServer ( std::string ip, int port ) {
 }
 
 void Connection::_send ( const char* message, size_t length ) {
-	std::lock_guard<std::mutex> lock(_sendMutex);
+	std::lock_guard lock(_sendMutex);
 #ifdef __linux__
 	if ( ::send(_socket, message, length, 0) < 0 ) { throw std::runtime_error("Could not send message"); }
 #elif _WIN32
@@ -156,14 +156,6 @@ void Connection::send ( const std::string& message ) {
 
 	messageToSend += _end;
 
-#ifdef HIKUP_DEBUG
-	std::cout << "SEND | " << messageToSend << std::endl;
-	if ( _encrypted ) {
-		_secretOpen(cloneStr);
-		std::cout << "SEND (opened) | " << cloneStr << std::endl;
-	}
-#endif
-
 
 	_send(messageToSend.c_str(), messageToSend.size());
 }
@@ -199,9 +191,7 @@ void Connection::rawSend ( const std::string& message, const int64_t chunkSize )
 
 	if ( _rawModeBuffer.size() >= static_cast<std::string::size_type>(chunkSize) ) {
 		_secretSeal(_rawModeBuffer);
-		_sendInternal(std::to_string(_rawModeBuffer.size()));
-		std::this_thread::sleep_for(std::chrono::milliseconds(300)); // TODO: hate this
-		_send(_rawModeBuffer.c_str(), _rawModeBuffer.size());
+		send(_rawModeBuffer);
 		_rawModeBuffer.clear();
 	}
 }
@@ -237,6 +227,10 @@ std::string Connection::receive () {
 	}
 
 	auto message = _receive();
+
+#ifdef HIKUP_DEBUG
+	std::cout << "RECEIVE | " << message << std::endl;
+#endif
 
 	// remove the _end string
 
@@ -499,36 +493,31 @@ void Connection::_secretSeal ( std::string& message ) const {
 	                     _remotePublicKey) < 0 )
 		throw std::runtime_error("Could not encrypt message");
 
-	const auto sodiumMaxEncodedLen = sodium_base64_ENCODED_LEN(crypto_box_SEALBYTES + message.size(),
-	                                                           sodium_base64_VARIANT_ORIGINAL);
-	const auto base64 = std::make_unique<char[]>(sodiumMaxEncodedLen);
+	const auto messageHex = std::make_unique<unsigned char[]>(( crypto_box_SEALBYTES + message.size() ) * 2 + 1);
 
-	sodium_bin2base64(base64.get(), sodiumMaxEncodedLen, cypherText.get(), crypto_box_SEALBYTES + message.size(),
-	                  sodium_base64_VARIANT_ORIGINAL);
+	sodium_bin2hex(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2 + 1,
+	               cypherText.get(), crypto_box_SEALBYTES + message.size());
 
-	message = std::string(reinterpret_cast<char*>(cypherText.get()), sodiumMaxEncodedLen);
+	message = std::string(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2);
 #ifdef HIKUP_DEBUG
 	std::cout << "SEAL (enc)| " << message << std::endl;
 #endif
 }
 
 void Connection::_secretOpen ( std::string& message ) const {
-	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 4 * 3 +2);
-	size_t binLen = 0;
-	auto ptr = message.c_str() + message.size();
+	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
 
-	if ( sodium_base642bin(cypherTextBin.get(), message.size() / 4 * 3 +2, message.c_str(), message.size(), nullptr,
-	                       &binLen, &ptr, sodium_base64_VARIANT_ORIGINAL) < 0 )
-		throw std::runtime_error(
-			"Could not decode message: more than bin_maxlen bytes are required to store the parsed string or the string couldn’t be fully parsed, but a valid pointer for b64_end was not provided.");
+	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, message.c_str(), message.size(), nullptr, nullptr,
+	                    nullptr) < 0 )
+		throw std::runtime_error("Could not decode message");
 
-	const auto decrypted = std::make_unique<unsigned char[]>(message.size() - crypto_box_SEALBYTES);
+	const auto decrypted = std::make_unique<unsigned char[]>(message.size() / 2 - crypto_box_SEALBYTES);
 
-	if ( crypto_box_seal_open(decrypted.get(), cypherTextBin.get(), binLen, _keyPair.publicKey,
+	if ( crypto_box_seal_open(decrypted.get(), cypherTextBin.get(), message.size() / 2, _keyPair.publicKey,
 	                          _keyPair.secretKey) < 0 )
 		throw std::runtime_error("Could not decrypt message");
 
-	message = std::string(reinterpret_cast<char*>(decrypted.get()), binLen - crypto_box_SEALBYTES);
+	message = std::string(reinterpret_cast<char*>(decrypted.get()), message.size() / 2 - crypto_box_SEALBYTES);
 #ifdef HIKUP_DEBUG
 	std::cout << "OPEN (dec)| " << message << std::endl;
 #endif
