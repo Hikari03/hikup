@@ -14,7 +14,7 @@ void HTTPFileServer::_run () const {
 	mg_mgr mgr{}; // Event manager
 	mg_mgr_init(&mgr); // Initialize event manager
 
-	const auto addr = "http://0.0.0.0:8000";
+	const auto addr = "http://0.0.0.0:6997";
 
 	// Setup listener
 	mg_http_listen(&mgr, addr, _ev_handler, nullptr);
@@ -46,7 +46,7 @@ void HTTPFileServer::_generateSymLinks () {
 	}
 }
 
-bool check_basic_auth ( struct mg_http_message* hm ) {
+bool check_basic_auth ( mg_http_message* hm ) {
 	char user[100], pass[100];
 	// mg_http_get_basic_auth parses basic auth header and extracts username/password into buffers
 	mg_http_creds(hm, user, sizeof( user ), pass, sizeof( pass ));
