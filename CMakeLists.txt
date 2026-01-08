@@ -28,7 +28,11 @@ add_executable(hikup-server server/main.cpp
         server/ClientInfo.hpp
         server/ConnectionServer.cpp
         server/ConnectionServer.hpp
-        server/utilServer.cpp)
+        server/utilServer.cpp
+        server/HTTPFileServer.cpp
+        server/HTTPFileServer.hpp
+        server/includes/mongoose.cpp
+        server/includes/mongoose.hpp)
 
 target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hikup ${LIBSODIUM_LIBRARIES})

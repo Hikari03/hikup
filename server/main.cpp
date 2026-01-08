@@ -13,6 +13,7 @@
 
 #include "accepter.cpp"
 #include "ConnectionServer.hpp"
+#include "HTTPFileServer.hpp"
 #include "terminal.cpp"
 #include "utilServer.cpp"
 
@@ -37,10 +38,12 @@ void receiveFile ( ConnectionServer& connection ) {
 	auto fileName = connection.receiveInternal().substr(strlen("filename:"));
 	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
 
+	const auto oldFileName = fileName;
+
 	// convert all '.' to '$' in the filename
 	std::ranges::replace(fileName, '.', '<');
 
-	std::filesystem::path _path = std::filesystem::absolute(fileName + '.' + hashFromClient);
+	std::filesystem::path _path = std::filesystem::current_path() / "storage" / ( fileName + '.' + hashFromClient );
 
 	std::cout << _path << std::endl;
 
@@ -52,7 +55,7 @@ void receiveFile ( ConnectionServer& connection ) {
 
 	connection.sendInternal("OK");
 
-	std::ofstream file(fileName, std::ios::binary);
+	std::ofstream file(_path, std::ios::binary);
 
 	std::cout << "main: starting download of size: " << size << std::endl;
 
@@ -90,11 +93,13 @@ void receiveFile ( ConnectionServer& connection ) {
 
 	crypto_generichash_final(&state, hash, sizeof hash);
 
-	std::ifstream fileStream(fileName, std::ios::binary);
-
 	auto hashString = binToHex(hash, sizeof hash);
 
-	std::filesystem::rename(fileName, fileName + "." + hashString);
+	auto newPath = std::filesystem::absolute(_path.string() + "." + hashString);
+
+	std::filesystem::rename(_path, newPath);
+
+	std::filesystem::create_symlink(newPath, std::filesystem::current_path()/ "links" / oldFileName);
 
 	connection.sendInternal(hashString);
 }
@@ -103,9 +108,9 @@ void sendFile ( ConnectionServer& connectionServer ) {
 	auto hash = connectionServer.receiveInternal().substr(strlen("hash:"));
 	std::string fileName;
 
-	for ( const auto& file: std::filesystem::directory_iterator(".") )
+	for ( const auto& file: std::filesystem::directory_iterator("storage") )
 		if ( file.path().extension() == '.' + hash )
-			fileName = file.path().filename();
+			fileName = file.path();
 
 	if ( fileName.empty() ) {
 		std::cout << "main: file not found" << std::endl;
@@ -156,18 +161,22 @@ void sendFile ( ConnectionServer& connectionServer ) {
 void removeFile ( ConnectionServer& connectionServer ) {
 	const auto hash = connectionServer.receiveInternal().substr(strlen("hash:"));
 
-	std::string fileName;
+	std::filesystem::path fileName;
 
-	for ( const auto& file: std::filesystem::directory_iterator(".") )
+	for ( const auto& file: std::filesystem::directory_iterator("storage") )
 		if ( file.path().extension() == '.' + hash )
-			fileName = file.path().filename();
+			fileName = file.path();
 
 	if ( fileName.empty() ) {
-		std::cout << "main: file not found" << std::endl;
+		std::cout << "main: file not found: " << fileName << std::endl;
 		connectionServer.sendInternal("NO");
 		return;
 	}
 
+	auto symlinkName = fileName.filename().string();
+	std::ranges::replace(symlinkName, '<', '.');
+
+	std::filesystem::remove(std::filesystem::current_path() / "links" / symlinkName);
 	std::filesystem::remove(fileName);
 
 	connectionServer.sendInternal("OK");
@@ -195,8 +204,38 @@ void serveConnection ( ClientInfo client ) {
 int main () {
 	std::signal(SIGINT, signalHandler);
 	std::signal(SIGTERM, signalHandler);
+	std::signal(SIGPIPE, SIG_IGN);
 
 	std::cout << "main: starting server" << std::endl;
+
+	std::filesystem::create_directory("storage");
+	std::filesystem::create_directory("links");
+
+
+	std::ifstream authFile("auth");
+
+	if ( !authFile.is_open() ) {
+		std::cerr << "main: could not open auth file, please supply `auth` file in " << std::filesystem::current_path() << " directory." << std::endl;
+		return 1;
+	}
+
+	/* expected format:
+	 * userName
+	 * userPass
+	*/
+	std::string authUser;
+	std::string authPass;
+	std::getline(authFile, authUser);
+	std::getline(authFile, authPass);
+	authFile.close();
+
+	if ( authUser.empty() || authPass.empty() ) {
+		std::cerr << "main: auth file is incorrect, please supply 'auth' file in " << std::filesystem::current_path() <<
+			" directory in format:\n\tuserName\n\tuserPass" << std::endl;
+		return 1;
+	}
+
+	std::cout << "main: auth file read successfully" << std::endl;
 
 	const int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -219,8 +258,21 @@ int main () {
 	bool newClientAccepted = false;
 	ClientInfo acceptedClient;
 
-	std::thread accepterThread(accepter, std::ref(callBack), std::ref(serverSocket), std::ref(acceptedClient),
-	                           std::ref(newClientAccepted), std::ref(turnOff));
+	std::thread accepterThread(
+		accepter,
+		std::ref(callBack),
+		std::ref(serverSocket),
+		std::ref(acceptedClient),
+		std::ref(newClientAccepted),
+		std::ref(turnOff)
+		);
+
+	HTTPFileServer httpFileServer(
+		turnOff,
+		std::filesystem::absolute(std::filesystem::current_path() / "links").string()
+		);
+
+	auto httpThread = httpFileServer.run(authUser, authPass);
 
 	std::cout << "main: entering main loop, server started" << std::endl;
 
@@ -264,6 +316,8 @@ int main () {
 			close(serverSocket);
 			accepterThread.join();
 			std::cout << "main: accepter closed" << std::endl;
+			httpThread.join();
+			std::cout << "main: http closed" << std::endl;
 			break;
 		}
 	}
