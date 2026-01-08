@@ -17,10 +17,10 @@ public:
 	HTTPFileServer ( bool& turnOff, std::string rootDir )
 		: _turnOff(turnOff) { HTTPFileServerVars::_rootDir = std::move(rootDir); }
 
-	[[nodiscard]] std::thread run ( std::string authUser = "admin", std::string authPass = "admin" );
+	[[nodiscard]] std::thread run ( std::string authUser = "admin", std::string authPass = "admin", const std::string & address = "0.0.0.0:6997" );
 
 private:
-	void _run () const;
+	void _run ( const std::string & address ) const;
 
 	static void _generateSymLinks ();
 

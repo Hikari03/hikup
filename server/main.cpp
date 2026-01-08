@@ -16,6 +16,7 @@
 #include "HTTPFileServer.hpp"
 #include "terminal.cpp"
 #include "utilServer.cpp"
+#include "includes/toml.hpp"
 
 sig_atomic_t stopRequested = 0;
 std::condition_variable callBack;
@@ -33,7 +34,7 @@ void signalHandler ( const int signal ) {
 	callBack.notify_one();
 }
 
-void receiveFile ( ConnectionServer& connection ) {
+void receiveFile ( ConnectionServer& connection, const Settings& settings ) {
 	const auto size = stoll(connection.receiveInternal().substr(strlen("size:")));
 	auto fileName = connection.receiveInternal().substr(strlen("filename:"));
 	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
@@ -50,6 +51,7 @@ void receiveFile ( ConnectionServer& connection ) {
 	if ( std::filesystem::exists(_path) ) {
 		std::cout << "main: file already exists" << std::endl;
 		connection.sendInternal("NO");
+		connection.sendInternal(settings.httpProtocol + "://" + settings.hostname + "/" + oldFileName);
 		return;
 	}
 
@@ -95,13 +97,12 @@ void receiveFile ( ConnectionServer& connection ) {
 
 	auto hashString = binToHex(hash, sizeof hash);
 
-	auto newPath = std::filesystem::absolute(_path.string() + "." + hashString);
-
-	std::filesystem::rename(_path, newPath);
-
-	std::filesystem::create_symlink(newPath, std::filesystem::current_path()/ "links" / oldFileName);
+	std::filesystem::create_symlink(_path, std::filesystem::current_path()/ "links" / oldFileName);
 
 	connection.sendInternal(hashString);
+	connection.sendInternal(std::to_string(settings.wantHttp));
+	if ( settings.wantHttp )
+		connection.sendInternal(settings.httpProtocol + "://" + settings.hostname + "/" + oldFileName);
 }
 
 void sendFile ( ConnectionServer& connectionServer ) {
@@ -182,7 +183,7 @@ void removeFile ( ConnectionServer& connectionServer ) {
 	connectionServer.sendInternal("OK");
 }
 
-void serveConnection ( ClientInfo client ) {
+void serveConnection ( ClientInfo client, const Settings& settings ) {
 	std::cout << "main: serving client " << client.getIp() << std::endl;
 
 	ConnectionServer connection(std::move(client));
@@ -194,7 +195,7 @@ void serveConnection ( ClientInfo client ) {
 	std::cout << "main: received message: " << message << std::endl;
 
 	if ( message == "command:UPLOAD" )
-		receiveFile(connection);
+		receiveFile(connection, settings);
 	else if ( message == "command:DOWNLOAD" )
 		sendFile(connection);
 	else if ( message == "command:REMOVE" )
@@ -211,37 +212,17 @@ int main () {
 	std::filesystem::create_directory("storage");
 	std::filesystem::create_directory("links");
 
+	const Settings settings = loadSettings();
 
-	std::ifstream authFile("auth/auth");
+	std::cout << "main: settings file read successfully" << std::endl;
 
-	if ( !authFile.is_open() ) {
-		std::cerr << "main: could not open auth file, please supply `auth` file in " << std::filesystem::current_path() / "auth" << " directory." << std::endl;
-		return 1;
-	}
-
-	/* expected format:
-	 * userName
-	 * userPass
-	*/
-	std::string authUser;
-	std::string authPass;
-	std::getline(authFile, authUser);
-	std::getline(authFile, authPass);
-	authFile.close();
-
-	if ( authUser.empty() || authPass.empty() ) {
-		std::cerr << "main: auth file is incorrect, please supply 'auth' file in " << std::filesystem::current_path() / "auth" <<
-			" directory in format:\n\tuserName\n\tuserPass" << std::endl;
-		return 1;
-	}
-
-	std::cout << "main: auth file read successfully" << std::endl;
+	std::cout << settings << std::endl;
 
 	const int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
 	sockaddr_in serverAddress = {AF_INET, htons(6998), {INADDR_ANY}, {0}};
 
-	if ( bind(serverSocket, reinterpret_cast<struct sockaddr*>(&serverAddress), sizeof( serverAddress )) < 0 ) {
+	if ( bind(serverSocket, reinterpret_cast<sockaddr*>(&serverAddress), sizeof( serverAddress )) < 0 ) {
 		std::cerr << "main: could not bind server socket" << std::endl;
 		close(serverSocket);
 		return 1;
@@ -267,12 +248,20 @@ int main () {
 		std::ref(turnOff)
 		);
 
-	HTTPFileServer httpFileServer(
+	std::thread httpThread;
+
+	if ( settings.wantHttp ) {
+		HTTPFileServer httpFileServer(
 		turnOff,
 		std::filesystem::absolute(std::filesystem::current_path() / "links").string()
 		);
 
-	auto httpThread = httpFileServer.run(authUser, authPass);
+		httpThread = httpFileServer.run(settings.authUser, settings.authPass, settings.httpAddress);
+
+		std::cout << "main: http server started" << std::endl;
+	}
+
+
 
 	std::cout << "main: entering main loop, server started" << std::endl;
 
@@ -286,7 +275,7 @@ int main () {
 
 			clientSocket = acceptedClient.getSocket();
 
-			try { serveConnection(std::move(acceptedClient)); }
+			try { serveConnection(std::move(acceptedClient), settings); }
 			catch ( const std::exception& e ) { std::cerr << "main: error serving client: " << e.what() << std::endl; }
 			newClientAccepted = false;
 		}
@@ -316,7 +305,8 @@ int main () {
 			close(serverSocket);
 			accepterThread.join();
 			std::cout << "main: accepter closed" << std::endl;
-			httpThread.join();
+			if ( settings.wantHttp )
+				httpThread.join();
 			std::cout << "main: http closed" << std::endl;
 			break;
 		}

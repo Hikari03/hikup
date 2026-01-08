@@ -76,9 +76,19 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		throw std::runtime_error("Server did not confirm the chunk");
 
 	connection.sendInternal("DONE");
-	auto hash = connection.receiveInternal();
+	const auto hash = connection.receiveInternal();
+	const bool httpExists = std::stoi(connection.receiveInternal());
+
 	std::cout << colorize("File uploaded successfully with hash: ", Color::GREEN) + colorize(hash, Color::CYAN) <<
 			std::endl;
+
+	if ( httpExists == true ) {
+		connection.sendInternal("getHttpLink");
+		const auto httpLink = connection.receiveInternal();
+		std::cout << colorize("HTTP link: ", Color::GREEN) + colorize(httpLink, Color::CYAN) << std::endl;
+	}
+	else { std::cout << colorize("HTTP link: ", Color::GREEN) + colorize("not available", Color::CYAN) << std::endl; }
+
 }
 
 void downloadFile ( Connection& connection ) {
@@ -185,6 +195,8 @@ int main ( int argc, char* argv[] ) {
 		if ( command == Command::Type::UPLOAD ) {
 			std::cout << colorize("Reason: file already exists\n", Color::RED) << colorize("Hash: ", Color::PURPLE) <<
 					colorize(hash, Color::CYAN) << std::endl;
+			const auto httpLink = connection.receiveInternal();
+			std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink , Color::CYAN) << std::endl;
 		}
 		else { std::cout << colorize("Reason: file does not exist", Color::RED) << std::endl; }
 		return 1;

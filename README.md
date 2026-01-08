@@ -7,11 +7,12 @@
 ### File Sharing Made Easy
 
 - **File Management**: Effortlessly upload, download, and remove files with just one command.
-- **Secure Transfer**: All data transfers between the client and server are encrypted to ensure data integrity and privacy.
+- **Secure Transfer**: All data transfers between the client and server are encrypted to ensure data integrity and privacy. ***( for the moment susceptible to man-in-the-middle attacks)***
 - **File Sharing in Three Simple Steps**:
-    1. Upload the desired file to the server and receive a unique hash.
-    2. Share the generated hash with designated recipients.
-    3. Recipients can use the hash to download the file directly from the server.
+    1. Upload the desired file to the server and receive a unique hash and HTTP link.
+    2. Share the generated hash or link with designated recipients.
+    3. Recipients can use the hash to download the file directly from the server using the `hikup` command or with HTTP.
+
 
 ## Dependencies
 ### Shared
@@ -36,8 +37,17 @@ cmake --build build --target hikup -j $(nproc)
 ```
 ## Server
 
-- **Uses Port** : 6998
-- If you want to change it you can do so in server/ConnectionServer.cpp and src/main.cpp
+### Settings
+- All available runtime settings are in `settings/settings.toml` with descriptions.
+
+### Default Ports
+- **Hikup protocol**: 6998
+  - If you want to change it, you can do so in `server/ConnectionServer.cpp` and `src/main.cpp`
+- **HTTP protocol**: 6997
+  - Can be changed in `settings/settings.json`
+
+> [!NOTE]
+> When using docker, external ports can be mapped in `docker-compose.yaml`
 
 ### Use Docker
 #### With scripts

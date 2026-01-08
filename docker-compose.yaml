@@ -1,6 +1,6 @@
 services:
   hikup-server:
-    image: hikari03/hikup:edge
+    image: hikari03/hikup:stable
     container_name: hikup-server
     ports:
       - "6997:6997"
@@ -9,5 +9,5 @@ services:
     stdin_open: true
     restart: always
     volumes:
-      - ./auth:/app/auth
+      - ./settings:/app/settings
       - ./storage:/app/storage

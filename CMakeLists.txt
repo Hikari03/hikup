@@ -32,7 +32,8 @@ add_executable(hikup-server server/main.cpp
         server/HTTPFileServer.cpp
         server/HTTPFileServer.hpp
         server/includes/mongoose.cpp
-        server/includes/mongoose.hpp)
+        server/includes/mongoose.hpp
+        server/includes/toml.hpp)
 
 target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hikup ${LIBSODIUM_LIBRARIES})

@@ -3,23 +3,22 @@
 #include <algorithm>
 #include <filesystem>
 
-[[nodiscard]] std::thread HTTPFileServer::run ( std::string authUser, std::string authPass ) {
+[[nodiscard]] std::thread HTTPFileServer::run ( std::string authUser, std::string authPass, const std::string & address ) {
 	HTTPFileServerVars::_authUser = std::move(authUser);
 	HTTPFileServerVars::_authPass = std::move(authPass);
 	_generateSymLinks();
-	return std::thread{&HTTPFileServer::_run, this};
+	return std::thread{&HTTPFileServer::_run, this, address};
 }
 
-void HTTPFileServer::_run () const {
+void HTTPFileServer::_run ( const std::string & address ) const {
 	mg_mgr mgr{}; // Event manager
 	mg_mgr_init(&mgr); // Initialize event manager
 
-	const auto addr = "http://0.0.0.0:6997";
 
 	// Setup listener
-	mg_http_listen(&mgr, addr, _ev_handler, nullptr);
+	mg_http_listen(&mgr, address.c_str(), _ev_handler, nullptr);
 
-	MG_INFO(("Listening on: %s", addr));
+	MG_INFO(("Listening on: %s", address.c_str()));
 	MG_INFO(("Web root: %s", HTTPFileServerVars::_rootDir.c_str()));
 
 	// Event loop
