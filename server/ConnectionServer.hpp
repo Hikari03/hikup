@@ -3,7 +3,7 @@
 #include <iostream>
 #include <sodium.h>
 
-#include "ClientInfo.h"
+#include "ClientInfo.hpp"
 
 
 #define _end "::--///--$$$"
@@ -13,17 +13,17 @@
 
 class ConnectionServer {
 public:
-	ConnectionServer ( ClientInfo clientInfo );
+	explicit ConnectionServer ( ClientInfo clientInfo );
 
 	~ConnectionServer ();
 
 	void init ();
 
-	void send ( const std::string& message );
+	void send ( const std::string& message ) const;
 
-	void sendInternal ( const std::string& message );
+	void sendInternal ( const std::string& message ) const;
 
-	void sendData ( const std::string& message );
+	void sendData ( const std::string& message ) const;
 
 	std::string receive ();
 
@@ -54,7 +54,7 @@ private:
 
 	void clearBuffer ();
 
-	void secretOpen ( std::string& message );
+	void secretOpen ( std::string& message ) const;
 
-	void secretSeal ( std::string& message );
+	void secretSeal ( std::string& message ) const;
 };

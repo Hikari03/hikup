@@ -1,5 +1,5 @@
-#include <string>
 #include <stdexcept>
+#include <string>
 
 namespace Command {
 
@@ -9,7 +9,7 @@ namespace Command {
 		REMOVE
 	};
 
-	inline std::string toString ( Type command ) {
+	inline std::string toString ( const Type command ) {
 		switch ( command ) {
 			case Type::UPLOAD:
 				return "UPLOAD";

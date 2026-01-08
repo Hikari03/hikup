@@ -1,3 +1,5 @@
 .idea
 cmake-build-*
 build
+storage
+auth

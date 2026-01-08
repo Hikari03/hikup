@@ -1,0 +1,9 @@
+[auth]
+user = 'admin'
+password = 'admin'
+
+[server]
+wantHttpServer = true
+httpAddress = "http://0.0.0.0:6997" # bind address
+httpProtocol = "http" # external http or https, useful when behind reverse proxy
+hostname = "example.org" # external hostname only for printing http links
