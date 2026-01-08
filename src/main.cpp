@@ -1,7 +1,7 @@
 #include <iostream>
 
 #include "CommandType.cpp"
-#include "Connection.h"
+#include "Connection.hpp"
 #include "util.cpp"
 
 void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection ) {

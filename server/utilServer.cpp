@@ -1,11 +1,10 @@
 #include <iomanip>
 #include <ios>
 #include <memory>
-#include <string>
 #include <sodium.h>
-#include <fstream>
+#include <string>
 
-inline std::string humanReadableSize ( size_t size ) {
+inline std::string humanReadableSize ( const size_t size ) {
 	const char* units[] = {"B", "KB", "MB", "GB", "TB"};
 	auto sizeDouble = static_cast<double>(size);
 	size_t unitIndex = 0;
@@ -23,7 +22,7 @@ inline std::string humanReadableSize ( size_t size ) {
 }
 
 inline std::string binToHex ( const unsigned char* bin, const size_t size ) {
-	auto hex = std::make_unique<char[]>(size * 2 + 1);
+	const auto hex = std::make_unique<char[]>(size * 2 + 1);
 
 	sodium_bin2hex(hex.get(), size * 2 + 1, bin, size);
 

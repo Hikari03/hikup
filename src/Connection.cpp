@@ -1,4 +1,4 @@
-#include "Connection.h"
+#include "Connection.hpp"
 
 #include <iostream>
 
@@ -45,7 +45,7 @@ void Connection::connectToServer ( std::string ip, int port ) {
 		}
 	}
 
-	if ( connect(_socket, (struct sockaddr*)&_server, sizeof( _server )) < 0 ) {
+	if ( connect(_socket, reinterpret_cast<struct sockaddr*>(&_server), sizeof( _server )) < 0 ) {
 		throw std::runtime_error("Could not connect to server");
 	}
 
@@ -77,7 +77,7 @@ void Connection::connectToServer ( std::string ip, int port ) {
 #endif
 }
 
-void Connection::_send ( const char* message, size_t length ) {
+void Connection::_send ( const char* message, const size_t length ) {
 	std::lock_guard<std::mutex> lock(_sendMutex);
 #ifdef __linux__
 	if ( ::send(_socket, message, length, 0) < 0 ) { throw std::runtime_error("Could not send message"); }
@@ -188,12 +188,12 @@ std::string Connection::receive () {
 
 
 	if ( message.contains(_internal"publicKey:") ) {
-		std::string publicKey = message.substr(strlen(_internal"publicKey:"));
+		const std::string publicKey = message.substr(strlen(_internal"publicKey:"));
 
 		if ( sodium_hex2bin(_remotePublicKey, crypto_box_PUBLICKEYBYTES, publicKey.c_str(), publicKey.size(), nullptr,
 		                    nullptr, nullptr) < 0 ) { throw std::runtime_error("Could not decode public key"); }
 
-		auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
+		const auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
 
 		sodium_bin2hex(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2 + 1, _keyPair.publicKey, crypto_box_PUBLICKEYBYTES);
 
@@ -217,9 +217,9 @@ std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime 
 		return {message, std::chrono::duration<double>(0)};
 	}
 
-	auto start = std::chrono::high_resolution_clock::now();
+	const auto start = std::chrono::high_resolution_clock::now();
 	auto message = _receive();
-	auto end = std::chrono::high_resolution_clock::now();
+	const auto end = std::chrono::high_resolution_clock::now();
 
 	// remove the _end string
 
@@ -267,12 +267,12 @@ std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime 
 
 
 	if ( message.contains(_internal"publicKey:") ) {
-		std::string publicKey = message.substr(strlen(_internal"publicKey:"));
+		const std::string publicKey = message.substr(strlen(_internal"publicKey:"));
 
 		if ( sodium_hex2bin(_remotePublicKey, crypto_box_PUBLICKEYBYTES, publicKey.c_str(), publicKey.size(), nullptr,
 							nullptr, nullptr) < 0 ) { throw std::runtime_error("Could not decode public key"); }
 
-		auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
+		const auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
 
 		sodium_bin2hex(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2 + 1, _keyPair.publicKey, crypto_box_PUBLICKEYBYTES);
 
@@ -366,14 +366,14 @@ std::vector<std::string> Connection::dnsLookup ( const std::string& domain, int 
 	return output;
 }
 
-void Connection::_secretSeal ( std::string& message ) {
-	auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
+void Connection::_secretSeal ( std::string& message ) const {
+	const auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
 
 	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.c_str()), message.size(),
 	                     _remotePublicKey) < 0 )
 		throw std::runtime_error("Could not encrypt message");
 
-	auto messageHex = std::make_unique<unsigned char[]>(( crypto_box_SEALBYTES + message.size() ) * 2 + 1);
+	const auto messageHex = std::make_unique<unsigned char[]>(( crypto_box_SEALBYTES + message.size() ) * 2 + 1);
 
 	sodium_bin2hex(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2 + 1,
 	               cypherText.get(), crypto_box_SEALBYTES + message.size());
@@ -381,18 +381,18 @@ void Connection::_secretSeal ( std::string& message ) {
 	message = std::string(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2);
 }
 
-void Connection::_secretOpen ( std::string& message ) {
+void Connection::_secretOpen ( std::string& message ) const {
 
 	if (message.length() % 2 != 0)
 		throw std::runtime_error("Invalid message to decrypt: " + message);
 
-	auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
+	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
 
 	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.c_str()),
 	                    message.size(), nullptr, nullptr, nullptr) < 0 )
 		throw std::runtime_error("Could not decode message: " + message);
 
-	auto decrypted = std::make_unique<unsigned char[]>(message.size() / 2 - crypto_box_SEALBYTES);
+	const auto decrypted = std::make_unique<unsigned char[]>(message.size() / 2 - crypto_box_SEALBYTES);
 
 	if ( crypto_box_seal_open(decrypted.get(), cypherTextBin.get(), message.size() / 2, _keyPair.publicKey,
 	                          _keyPair.secretKey) < 0 )

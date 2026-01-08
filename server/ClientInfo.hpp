@@ -1,14 +1,15 @@
 #pragma once
+
 #include <string>
 #include <vector>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
 
 struct ClientInfo {
 
 	ClientInfo() = default;
 
-	bool init(const std::string & ip, const int & socket);
+	bool init(const std::string & _ip, const int & socket);
 
 	[[nodiscard]] std::string getIp() const;
 	[[nodiscard]] int getSocket() const;

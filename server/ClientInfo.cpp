@@ -1,10 +1,10 @@
-#include "ClientInfo.h"
+#include "ClientInfo.hpp"
 
-bool ClientInfo::init(const std::string & ip, const int & socket) {
+bool ClientInfo::init(const std::string & _ip, const int & socket) {
 	if(initialized)
 		return false;
 
-	this->ip = ip;
+	this->ip = _ip;
 	this->socket_ = socket;
 	this->initialized = true;
 	return true;

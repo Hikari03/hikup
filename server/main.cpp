@@ -12,7 +12,7 @@
 #include <sys/socket.h>
 
 #include "accepter.cpp"
-#include "ConnectionServer.h"
+#include "ConnectionServer.hpp"
 #include "terminal.cpp"
 #include "utilServer.cpp"
 
@@ -38,7 +38,7 @@ void receiveFile ( ConnectionServer& connection ) {
 	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
 
 	// convert all '.' to '$' in the filename
-	std::replace(fileName.begin(), fileName.end(), '.', '<');
+	std::ranges::replace(fileName, '.', '<');
 
 	std::filesystem::path _path = std::filesystem::absolute(fileName + '.' + hashFromClient);
 
@@ -134,7 +134,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 	connectionServer.sendInternal(std::to_string(fileSize));
 
 	auto clientFileName = fileName.substr(0, fileName.find_last_of('.'));
-	std::replace(clientFileName.begin(), clientFileName.end(), '<', '.');
+	std::ranges::replace(clientFileName, '<', '.');
 
 	connectionServer.sendInternal(clientFileName);
 
@@ -154,7 +154,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 }
 
 void removeFile ( ConnectionServer& connectionServer ) {
-	auto hash = connectionServer.receiveInternal().substr(strlen("hash:"));
+	const auto hash = connectionServer.receiveInternal().substr(strlen("hash:"));
 
 	std::string fileName;
 
@@ -180,7 +180,7 @@ void serveConnection ( ClientInfo client ) {
 
 	connection.init();
 
-	auto message = connection.receiveInternal();
+	const auto message = connection.receiveInternal();
 
 	std::cout << "main: received message: " << message << std::endl;
 
@@ -200,7 +200,7 @@ int main () {
 
 	const int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
-	sockaddr_in serverAddress = {AF_INET, htons(6998), INADDR_ANY, {0}};
+	sockaddr_in serverAddress = {AF_INET, htons(6998), {INADDR_ANY}, {0}};
 
 	if ( bind(serverSocket, reinterpret_cast<struct sockaddr*>(&serverAddress), sizeof( serverAddress )) < 0 ) {
 		std::cerr << "main: could not bind server socket" << std::endl;

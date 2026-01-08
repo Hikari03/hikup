@@ -15,7 +15,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBSODIUM REQUIRED libsodium)
 
 add_executable(hikup src/main.cpp
-        src/Connection.h
+        src/Connection.hpp
         src/Connection.cpp
         src/util.cpp
         src/CommandType.cpp
@@ -25,9 +25,9 @@ add_executable(hikup-server server/main.cpp
         server/terminal.cpp
         server/accepter.cpp
         server/ClientInfo.cpp
-        server/ClientInfo.h
+        server/ClientInfo.hpp
         server/ConnectionServer.cpp
-        server/ConnectionServer.h
+        server/ConnectionServer.hpp
         server/utilServer.cpp)
 
 target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})

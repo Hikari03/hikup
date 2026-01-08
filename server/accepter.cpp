@@ -1,7 +1,7 @@
 #include <condition_variable>
 #include <iostream>
 
-#include "ClientInfo.h"
+#include "ClientInfo.hpp"
 
 inline void accepter ( std::condition_variable& callBack,
                        const int& serverSocket,

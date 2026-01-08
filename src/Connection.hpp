@@ -100,7 +100,7 @@ private:
 
 	std::string _receive ();
 
-	void _secretOpen ( std::string& message );
+	void _secretOpen ( std::string& message ) const;
 
-	void _secretSeal ( std::string& message );
+	void _secretSeal ( std::string& message ) const;
 };
