@@ -78,3 +78,8 @@ cmake --build build --target hikup-server -j $(nproc)
 ``` bash
 ./hikup-server
 ```
+
+# Acknowledgements
+- [libsodium](https://github.com/jedisct1/libsodium) for encryption
+- [mongoose](https://github.com/cesanta/mongoose) for web server
+- [toml++](https://github.com/marzer/tomlplusplus) for config parsing
