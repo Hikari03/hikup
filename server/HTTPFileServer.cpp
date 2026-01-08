@@ -77,12 +77,27 @@ void HTTPFileServer::_ev_handler ( mg_connection* c, const int ev, void* ev_data
 				mg_http_reply(c, 404, "", "File not found");
 				return;
 			}
+			char buf[10] = {0};
+			if (mg_http_get_var(&hm->query, "inplace", buf, sizeof(buf)) <= 0) {
+				// Default to download if 'inplace' parameter is not present
+				strcpy(buf, "no");
+			}
 
-			const auto download_header = "Content-Disposition: attachment\r\n";
-			opts.extra_headers = download_header;
 			const auto path = HTTPFileServerVars::_rootDir + filePath;
-			MG_INFO(("Serving file: %s", path.c_str()));
-			mg_http_serve_file(c, hm, path.c_str(), &opts);
+
+			if ( strcmp(buf, "yes") == 0 ) {
+				MG_INFO(("Serving file: %s", path.c_str()));
+				mg_http_serve_file(c, hm, path.c_str(), &opts);
+				return;
+			}
+			if ( strcmp(buf, "no") == 0 ) {
+				const auto download_header = "Content-Disposition: attachment\r\n";
+				opts.extra_headers = download_header;
+				MG_INFO(("Serving file: %s", path.c_str()));
+				mg_http_serve_file(c, hm, path.c_str(), &opts);
+				return;
+			}
+
 		}
 
 		mg_http_reply(c, 404, "", "File not found");

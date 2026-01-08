@@ -147,7 +147,9 @@ int main ( int argc, char* argv[] ) {
 	if ( argc < 4 ) {
 		std::cout << "Usage: " << argv[0] << " <up <file> | down <hash> | rm <hash>> <server> \n\n"
 				"If file is successfully uploaded, you will get file hash\n"
-				"which you need to input if you want to download it" << std::endl;
+				"which you need to input if you want to download it\n\n"
+		        "If server has HTTP server, you will get link for download.\n"
+				"You can append '?inplace=yes' to the link to view the file in browser." << std::endl;
 		return 1;
 	}
 
