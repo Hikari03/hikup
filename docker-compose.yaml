@@ -9,5 +9,5 @@ services:
     stdin_open: true
     restart: always
     volumes:
-      - ./auth:/app/auth
+      - file:./auth:/app/auth
       - ./storage:/app/storage

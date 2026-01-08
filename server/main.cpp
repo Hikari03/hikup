@@ -212,10 +212,10 @@ int main () {
 	std::filesystem::create_directory("links");
 
 
-	std::ifstream authFile("auth");
+	std::ifstream authFile("auth/auth");
 
 	if ( !authFile.is_open() ) {
-		std::cerr << "main: could not open auth file, please supply `auth` file in " << std::filesystem::current_path() << " directory." << std::endl;
+		std::cerr << "main: could not open auth file, please supply `auth` file in " << std::filesystem::current_path() / "auth" << " directory." << std::endl;
 		return 1;
 	}
 
@@ -230,7 +230,7 @@ int main () {
 	authFile.close();
 
 	if ( authUser.empty() || authPass.empty() ) {
-		std::cerr << "main: auth file is incorrect, please supply 'auth' file in " << std::filesystem::current_path() <<
+		std::cerr << "main: auth file is incorrect, please supply 'auth' file in " << std::filesystem::current_path() / "auth" <<
 			" directory in format:\n\tuserName\n\tuserPass" << std::endl;
 		return 1;
 	}
