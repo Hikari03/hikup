@@ -13,6 +13,8 @@
     2. Share the generated hash or link with designated recipients.
     3. Recipients can use the hash to download the file directly from the server using the `hikup` command or with HTTP.
 
+> [!NOTE]
+> If you append `?inplace=yes` to the HTTP link, you can view the file directly in the browser.
 
 ## Dependencies
 ### Shared
@@ -36,6 +38,8 @@ cmake --build build --target hikup -j $(nproc)
 ./hikup # for help
 ```
 ## Server
+> [!NOTE]
+> The server is currently in development and may not be stable.
 
 ### Settings
 - All available runtime settings are in `settings/settings.toml` with descriptions.
