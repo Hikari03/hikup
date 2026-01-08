@@ -10,7 +10,7 @@ RUN apk add --no-cache pkgconf libsodium-dev cmake g++ make \
     && cmake -B build -S . \
     && cmake --build build --target hikup-server \
     && mv build/hikup-server /app/hikup-server \
-    && rm -rf build
+    && rm -rf build src server
 
 EXPOSE 6997
 EXPOSE 6998
