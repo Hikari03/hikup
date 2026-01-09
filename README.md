@@ -38,8 +38,6 @@ cmake --build build --target hikup -j $(nproc)
 ./hikup # for help
 ```
 ## Server
-> [!NOTE]
-> The server is currently in development and may not be stable.
 
 ### Settings
 - All available runtime settings are in `settings/settings.toml` with descriptions.

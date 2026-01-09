@@ -174,8 +174,11 @@ void removeFile ( ConnectionServer& connectionServer ) {
 		return;
 	}
 
-	auto symlinkName = fileName.filename().string();
+	auto symlinkName = fileName.filename().string().substr(0,fileName.filename().string().find('.'));
 	std::ranges::replace(symlinkName, '<', '.');
+
+
+	std::cout << "main: removing files: " << (std::filesystem::current_path() / "links" / symlinkName) << ", " << fileName << std::endl;
 
 	std::filesystem::remove(std::filesystem::current_path() / "links" / symlinkName);
 	std::filesystem::remove(fileName);
@@ -187,19 +190,23 @@ void serveConnection ( ClientInfo client, const Settings& settings ) {
 	std::cout << "main: serving client " << client.getIp() << std::endl;
 
 	ConnectionServer connection(std::move(client));
+	try {
 
 	connection.init();
 
 	const auto message = connection.receiveInternal();
 
 	std::cout << "main: received message: " << message << std::endl;
-
+	//sleep(10);
 	if ( message == "command:UPLOAD" )
 		receiveFile(connection, settings);
 	else if ( message == "command:DOWNLOAD" )
 		sendFile(connection);
 	else if ( message == "command:REMOVE" )
 		removeFile(connection);
+	} catch ( const std::exception& e ) {
+		std::cerr << "main: error serving client: " << e.what() << std::endl;
+	}
 }
 
 int main () {
@@ -275,8 +282,7 @@ int main () {
 
 			clientSocket = acceptedClient.getSocket();
 
-			try { serveConnection(std::move(acceptedClient), settings); }
-			catch ( const std::exception& e ) { std::cerr << "main: error serving client: " << e.what() << std::endl; }
+			serveConnection(std::move(acceptedClient), settings);
 			newClientAccepted = false;
 		}
 

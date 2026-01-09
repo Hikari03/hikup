@@ -143,7 +143,7 @@ void downloadFile ( Connection& connection ) {
 	std::cout << std::endl;
 }
 
-int main ( int argc, char* argv[] ) {
+int start( int argc, char* argv[] ) {
 	if ( argc < 4 ) {
 		std::cout << "Usage: " << argv[0] << " <up <file> | down <hash> | rm <hash>> <server> \n\n"
 				"If file is successfully uploaded, you will get file hash\n"
@@ -217,4 +217,13 @@ int main ( int argc, char* argv[] ) {
 		downloadFile(connection);
 
 	return 0;
+}
+
+int main ( int argc, char* argv[] ) {
+	try {
+		return start(argc, argv);
+	} catch ( std::exception& e ) {
+		std::cerr << colorize(e.what(), Color::RED) << std::endl;
+		return 1;
+	}
 }
