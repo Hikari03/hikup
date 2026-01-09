@@ -34,7 +34,7 @@ void Connection::connectToServer ( std::string ip, int port ) {
 
 
 	if ( inet_pton(AF_INET, ip.c_str(), &_server.sin_addr) <= 0 ) {
-		if ( auto result = dnsLookup(ip); result.empty() ) {
+		if ( const auto result = dnsLookup(ip); result.empty() ) {
 			throw std::runtime_error("Invalid address / Address not supported");
 		}
 		else {
@@ -45,9 +45,18 @@ void Connection::connectToServer ( std::string ip, int port ) {
 		}
 	}
 
+	timeval timeout{};
+	timeout.tv_sec = 5; // Timeout in seconds
+	timeout.tv_usec = 0; // Timeout in microseconds
+
+	if ( setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
+		throw std::runtime_error("setsockopt failed");
+	}
+
 	if ( connect(_socket, reinterpret_cast<struct sockaddr*>(&_server), sizeof( _server )) < 0 ) {
 		throw std::runtime_error("Could not connect to server");
 	}
+
 
 	receive(); // encryption initialization
 
@@ -96,7 +105,7 @@ std::string Connection::_receive () {
 
 		_sizeOfPreviousMessage = recv(_socket, _buffer, 1024*256, 0);
 
-		if ( _sizeOfPreviousMessage < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != MSG_WAITALL ) {
+		if ( _sizeOfPreviousMessage < 0 || errno == EAGAIN || errno == EWOULDBLOCK ) {
 			throw std::runtime_error("Could not receive message from server: " + std::string(strerror(errno)));
 		}
 
