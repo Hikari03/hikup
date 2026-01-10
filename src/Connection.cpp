@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-Connection::Connection () {
+Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_unique<char[]>(bufferSize)), _bufferSize(bufferSize) {
 #ifdef __linux__
 	_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if ( _socket == -1 ) { throw std::runtime_error("Could not create socket"); }
@@ -21,7 +21,7 @@ Connection::Connection () {
 	if ( sodium_init() < 0 ) { throw std::runtime_error("Could not initialize sodium"); }
 
 	crypto_box_keypair(_keyPair.publicKey, _keyPair.secretKey);
-	memset(_buffer, '\0', 4096);
+	memset(_buffer.get(), '\0', 4096);
 }
 
 void Connection::connectToServer ( std::string ip, int port ) {
@@ -103,13 +103,13 @@ std::string Connection::_receive () {
 	while ( !message.ends_with(_end) ) {
 		clearBuffer();
 
-		_sizeOfPreviousMessage = recv(_socket, _buffer, 1024*256, 0);
+		_sizeOfPreviousMessage = recv(_socket, _buffer.get(), _bufferSize, 0);
 
 		if ( _sizeOfPreviousMessage < 0 || errno == EAGAIN || errno == EWOULDBLOCK ) {
 			throw std::runtime_error("Could not receive message from server: " + std::string(strerror(errno)));
 		}
 
-		message += _buffer;
+		message += _buffer.get();
 	}
 
 	return message;
@@ -330,7 +330,7 @@ Connection::~Connection () {
 		close();
 }
 
-void Connection::clearBuffer () { memset(_buffer, '\0', _sizeOfPreviousMessage); }
+void Connection::clearBuffer () const { memset(_buffer.get(), '\0', _sizeOfPreviousMessage); }
 
 std::vector<std::string> Connection::dnsLookup ( const std::string& domain, int ipv ) {
 	// credit to http://www.zedwood.com/article/cpp-dns-lookup-ipv4-and-ipv6

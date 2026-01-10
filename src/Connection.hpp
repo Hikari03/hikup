@@ -42,7 +42,7 @@
  */
 class Connection {
 public:
-	Connection ();
+	explicit Connection ( unsigned long bufferSize = 4*1024*1024 );
 
 	~Connection ();
 
@@ -62,6 +62,8 @@ public:
 
 	std::string receiveData ();
 
+	size_t connectionSpeed ();
+
 	void close ();
 
 private:
@@ -70,10 +72,11 @@ private:
 		unsigned char secretKey[crypto_box_SECRETKEYBYTES];
 	};
 
-	char _buffer[1024*256+1] = {};
+	std::unique_ptr<char[]> _buffer;
 	std::vector<std::string> _messagesBuffer;
 	KeyPair _keyPair;
 	unsigned char _remotePublicKey[crypto_box_PUBLICKEYBYTES];
+	unsigned long _bufferSize = 4*1024*1024;
 	std::mutex _sendMutex;
 
 #ifdef __linux__
@@ -92,7 +95,7 @@ private:
 	bool _encrypted = false;
 	bool _moreInBuffer = false;
 
-	void clearBuffer ();
+	void clearBuffer () const;
 
 	[[nodiscard]] static std::vector<std::string> dnsLookup ( const std::string& domain, int ipv = 4 );
 

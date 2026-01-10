@@ -1,7 +1,9 @@
 #include <filesystem>
 #include <fstream>
-#include <string>
 #include <sodium.h>
+#include <string>
+#include <sys/sysinfo.h>
+
 
 #include "Color.cpp"
 
@@ -51,7 +53,7 @@ inline std::string colorize ( const std::string& text, Color color ) {
 	}
 }
 
-inline std::string humanReadableSize ( std::ifstream::pos_type size ) {
+inline std::string humanReadableSize ( const size_t size ) {
 	const char* units[] = {"B", "KB", "MB", "GB", "TB"};
 	auto sizeDouble = static_cast<double>(size);
 	size_t unitIndex = 0;
@@ -102,19 +104,23 @@ inline std::pair<unsigned char*, size_t> hexToBin ( const std::string& hex ) {
 
 inline std::string computeHash ( std::ifstream& file ) {
 	file.seekg(0);
-	auto buffer = std::make_unique<char[]>(1024);
+	const auto buffer = std::make_unique<char[]>(1024 * 1024 * 1024);
 	unsigned char hash[crypto_generichash_BYTES];
 	crypto_generichash_state state;
 	crypto_generichash_init(&state, nullptr, 0, sizeof hash);
 
 	while ( true ) {
-		auto bytesRead = file.readsome(buffer.get(), 1024);
+		const auto bytesRead = file.readsome(buffer.get(), 1024 * 1024 * 1024);
 
-		if ( bytesRead == 0 ) {
+		if ( bytesRead == -1 ) {
 			if ( file.fail() )
 				throw std::runtime_error("Error reading file.");
 			break;
 		}
+
+		if ( bytesRead == 0 )
+			break;
+
 		else {
 			// Update hash with the bytes read
 			crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(buffer.get()),
@@ -128,4 +134,10 @@ inline std::string computeHash ( std::ifstream& file ) {
 	file.seekg(0);
 
 	return binToHex(hash, sizeof hash);
+}
+
+inline unsigned long getFreeMemory () {
+	struct sysinfo memInfo{};
+	sysinfo(&memInfo);
+	return memInfo.freeram;
 }

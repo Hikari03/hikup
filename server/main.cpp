@@ -131,7 +131,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 
 	auto fileSize = std::filesystem::file_size(fileName);
 
-	constexpr size_t chunkSize = 256 * 1024;
+	constexpr size_t chunkSize = 4 * 1024 * 1024;
 	auto buffer = std::make_unique<char[]>(chunkSize);
 
 	const unsigned long long totalChunks = fileSize / chunkSize + 1;
@@ -189,7 +189,13 @@ void removeFile ( ConnectionServer& connectionServer ) {
 void serveConnection ( ClientInfo client, const Settings& settings ) {
 	std::cout << "main: serving client " << client.getIp() << std::endl;
 
-	ConnectionServer connection(std::move(client));
+	auto freeRam = getFreeMemory();
+
+	std::cout << "main: free ram: " << humanReadableSize(freeRam) << std::endl;
+	freeRam = freeRam > 1024 * 1024 * 512 ? 1024 * 1024 * 512 : freeRam; // be under 512 MiB
+	std::cout << "main: free ram after limit: " << humanReadableSize(freeRam) << std::endl;
+
+	ConnectionServer connection(std::move(client), freeRam / 4);
 	try {
 
 	connection.init();

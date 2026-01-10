@@ -6,8 +6,8 @@
 #include <thread>
 #include <sys/socket.h>
 
-ConnectionServer::ConnectionServer ( ClientInfo clientInfo )
-	: _clientInfo(std::move(clientInfo)) {}
+ConnectionServer::ConnectionServer ( ClientInfo clientInfo, const unsigned long bufferSize )
+	: _buffer(std::make_unique<char[]>(bufferSize)), _clientInfo(std::move(clientInfo)), _bufferSize(bufferSize) {}
 
 ConnectionServer::~ConnectionServer () {
 	_active = false;
@@ -65,9 +65,10 @@ void ConnectionServer::initEncryption () {
 	_encrypted = true;
 }
 
-void ConnectionServer::clearBuffer () { memset(_buffer, '\0', _sizeOfPreviousMessage); }
+void ConnectionServer::clearBuffer () const { memset(_buffer.get(), '\0', _sizeOfPreviousMessage); }
 
 std::string ConnectionServer::receive () {
+
 	_message.clear();
 
 	if ( _moreInBuffer ) {
@@ -82,7 +83,7 @@ std::string ConnectionServer::receive () {
 		//std::cout << "RECEIVE BUFFER BEFORE CLEAR|  " << _clientInfo.socket_ << ": " << _buffer << std::endl;
 		clearBuffer();
 
-		_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer, 256*1024, 0);
+		_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer.get(), _bufferSize, 0);
 
 
 		if ( _sizeOfPreviousMessage < 0 ) {
@@ -93,7 +94,7 @@ std::string ConnectionServer::receive () {
 				throw std::runtime_error("timeout");
 		}
 
-		_message += _buffer;
+		_message += _buffer.get();
 
 		//std::cout << "RECEIVE |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << _message << std::endl;
 	}

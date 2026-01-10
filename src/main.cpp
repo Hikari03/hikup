@@ -11,8 +11,8 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 	}
 
 	// we will send the file in chunks of 128KB
-	constexpr size_t chunkSize = 256 * 1024;
-	auto buffer = std::make_unique<char[]>(chunkSize);
+	constexpr size_t chunkSize = 4 * 1024 * 1024;
+	const auto buffer = std::make_unique<char[]>(chunkSize);
 
 	const unsigned long long totalChunks = fileSize / chunkSize + 1;
 	const size_t lastChunkSize = fileSize % chunkSize;
@@ -153,20 +153,36 @@ int start( int argc, char* argv[] ) {
 		return 1;
 	}
 
-	Command::Type command;
-	Connection connection;
+	auto command = Command::resolveCommand(argv[1]);
+
+	unsigned long freeRam = 1024;
+
+	if ( command == Command::Type::DOWNLOAD ) {
+		freeRam = getFreeMemory();
+		freeRam = freeRam > 1024 * 1024 * 512 ? 1024 * 1024 * 512 : freeRam; // be under 512 MiB
+		std::cout << colorize("Ram usage will be: ", Color::BLUE) << colorize(humanReadableSize(freeRam), Color::LL_BLUE) << std::endl;
+	}
+
+
+	Connection connection(freeRam / 4);
 	std::ifstream file;
 	std::ifstream::pos_type fileSize;
 	std::string fileName;
+	std::string hash;
 
 	try {
-		command = Command::resolveCommand(argv[1]);
 		if ( command == Command::Type::UPLOAD ) {
 			auto [_file, _fileSize, _fileName] = resolveFile(argv[2]);
 			file = std::move(_file);
 			fileSize = _fileSize;
 			fileName = _fileName;
+
+			std::cout << colorize("Computing hash", Color::GREEN) << std::endl;
+			hash = computeHash(file);
+			std::cout << colorize("Hash computed", Color::GREEN) << std::endl;
 		}
+
+		std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
 		connection.connectToServer(argv[3], 6998);
 		std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
 	}
@@ -175,15 +191,10 @@ int start( int argc, char* argv[] ) {
 		return 1;
 	}
 
-	std::string hash;
-
 	connection.sendInternal("command:" + Command::toString(command));
 	if ( command == Command::Type::UPLOAD ) {
 		connection.sendInternal("size:" + std::to_string(fileSize));
 		connection.sendInternal("filename:" + fileName);
-
-		hash = computeHash(file);
-
 		connection.sendInternal("hash:" + hash);
 	}
 	else if ( command == Command::Type::DOWNLOAD || command == Command::Type::REMOVE ) {
@@ -219,7 +230,11 @@ int start( int argc, char* argv[] ) {
 	return 0;
 }
 
-int main ( int argc, char* argv[] ) {
+int main ( const int argc, char* argv[] ) {
+
+	std::ios::sync_with_stdio(false);
+	std::cin.tie(nullptr);
+
 	try {
 		return start(argc, argv);
 	} catch ( std::exception& e ) {
