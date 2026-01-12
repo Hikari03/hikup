@@ -12,8 +12,13 @@
 #define _data "DATA::"
 
 
+
+
 class ConnectionServer {
 public:
+
+	explicit ConnectionServer ( ClientInfo clientInfo );
+
 	ConnectionServer ( ClientInfo clientInfo, unsigned long bufferSize );
 
 	~ConnectionServer ();
@@ -32,6 +37,13 @@ public:
 
 	std::string receiveData ();
 
+	void resizeBuffer ( unsigned long newSize );
+
+	struct ConnectionSpeed {
+		size_t uploadSpeed = 0;
+		size_t downloadSpeed = 0;
+	};
+
 private:
 	struct KeyPair {
 		unsigned char publicKey[crypto_box_PUBLICKEYBYTES];
@@ -42,6 +54,7 @@ private:
 	KeyPair _keyPair;
 	ClientInfo _clientInfo;
 	std::vector<std::string> _messagesBuffer;
+	ConnectionSpeed _connectionSpeed;
 
 
 	long int _sizeOfPreviousMessage = 0;
@@ -60,4 +73,6 @@ private:
 	void secretOpen ( std::string& message ) const;
 
 	void secretSeal ( std::string& message ) const;
+
+	void _handleConnSpeedTest ();
 };

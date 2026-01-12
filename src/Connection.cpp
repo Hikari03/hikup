@@ -21,10 +21,10 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 	if ( sodium_init() < 0 ) { throw std::runtime_error("Could not initialize sodium"); }
 
 	crypto_box_keypair(_keyPair.publicKey, _keyPair.secretKey);
-	memset(_buffer.get(), '\0', 4096);
+	memset(_buffer.get(), '\0', _bufferSize);
 }
 
-void Connection::connectToServer ( std::string ip, int port ) {
+void Connection::connectToServer ( std::string ip, const int port ) {
 	if ( ip == "localhost" || ip.empty() )
 		ip = "127.0.0.1";
 
@@ -53,7 +53,7 @@ void Connection::connectToServer ( std::string ip, int port ) {
 		throw std::runtime_error("setsockopt failed");
 	}
 
-	if ( connect(_socket, reinterpret_cast<struct sockaddr*>(&_server), sizeof( _server )) < 0 ) {
+	if ( connect(_socket, reinterpret_cast<sockaddr*>(&_server), sizeof( _server )) < 0 ) {
 		throw std::runtime_error("Could not connect to server");
 	}
 
@@ -109,7 +109,7 @@ std::string Connection::_receive () {
 			throw std::runtime_error("Could not receive message from server: " + std::string(strerror(errno)));
 		}
 
-		message += _buffer.get();
+		message += std::string(_buffer.get(), _sizeOfPreviousMessage);
 	}
 
 	return message;
@@ -118,21 +118,22 @@ std::string Connection::_receive () {
 void Connection::send ( const std::string& message ) {
 	auto messageToSend = message;
 
-#ifdef HIKUP_DEBUG
+#ifdef HIKUP_CONN_DEBUG
 	printf("SEND | %s\n", messageToSend.c_str());
 #endif
 
-	if ( _encrypted )
+	if ( _encrypted ) {
 		_secretSeal(messageToSend);
 
-	if (messageToSend.size() % 2 != 0)
-		throw std::runtime_error("Invalid message to send");
+		if (messageToSend.size() % 2 != 0)
+			throw std::runtime_error("Invalid message to send");
+	}
 
 	messageToSend += _end;
 
 	//std::cout << "\nSEND | " << messageToSend << std::endl;
 
-	_send(messageToSend.c_str(), messageToSend.size());
+	_send(messageToSend.data(), messageToSend.size());
 }
 
 void Connection::sendData ( const std::string& message ) { send(_data + message); }
@@ -185,7 +186,7 @@ std::string Connection::receive () {
 		_moreInBuffer = true;
 
 
-#ifdef HIKUP_DEBUG
+#ifdef HIKUP_CONN_DEBUG
 	std::cout << "RECEIVE | " << message << std::endl;
 	std::cout << "RECEIVE BUFFER | "
 			  << std::accumulate(_messagesBuffer.begin(), _messagesBuffer.end(), std::string(),
@@ -264,7 +265,7 @@ std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime 
 		_moreInBuffer = true;
 
 
-#ifdef HIKUP_DEBUG
+#ifdef HIKUP_CONN_DEBUG
 	std::cout << "RECEIVE | " << message << std::endl;
 	std::cout << "RECEIVE BUFFER | "
 			  << std::accumulate(_messagesBuffer.begin(), _messagesBuffer.end(), std::string(),
@@ -311,6 +312,11 @@ std::string Connection::receiveData () {
 		throw std::runtime_error("Invalid message received (data)");
 
 	return message.substr(strlen(_data));
+}
+
+void Connection::resizeBuffer ( const unsigned long newSize )  {
+	_buffer = std::make_unique<char[]>(newSize);
+	_bufferSize = newSize;
 }
 
 void Connection::close () {
@@ -378,7 +384,7 @@ std::vector<std::string> Connection::dnsLookup ( const std::string& domain, int 
 void Connection::_secretSeal ( std::string& message ) const {
 	const auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
 
-	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.c_str()), message.size(),
+	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.data()), message.size(),
 	                     _remotePublicKey) < 0 )
 		throw std::runtime_error("Could not encrypt message");
 
@@ -397,7 +403,7 @@ void Connection::_secretOpen ( std::string& message ) const {
 
 	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
 
-	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.c_str()),
+	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.data()),
 	                    message.size(), nullptr, nullptr, nullptr) < 0 )
 		throw std::runtime_error("Could not decode message: " + message);
 

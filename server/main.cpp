@@ -73,19 +73,20 @@ void receiveFile ( ConnectionServer& connection, const Settings& settings ) {
 		catch ( const std::exception& e ) {
 			std::cerr << "main: error receiving message: " << e.what() << std::endl;
 			file.close();
-			std::filesystem::remove(fileName);
+			std::filesystem::remove(_path);
+			connection.sendInternal("fail");
 			return;
 		}
 
 		if ( message.starts_with(_internal"DONE") )
 			break;
 
-		file.write(message.c_str(), message.size());
+		file.write(message.data(), message.size());
 		sizeWritten += message.size();
 
 		connection.sendInternal("confirm");
 
-		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.c_str()), message.size());
+		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.data()), message.size());
 
 		std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(size) <<
 				" bytes written" << std::flush;
@@ -189,27 +190,20 @@ void removeFile ( ConnectionServer& connectionServer ) {
 void serveConnection ( ClientInfo client, const Settings& settings ) {
 	std::cout << "main: serving client " << client.getIp() << std::endl;
 
-	auto freeRam = getFreeMemory();
-
-	std::cout << "main: free ram: " << humanReadableSize(freeRam) << std::endl;
-	freeRam = freeRam > 1024 * 1024 * 512 ? 1024 * 1024 * 512 : freeRam; // be under 512 MiB
-	std::cout << "main: free ram after limit: " << humanReadableSize(freeRam) << std::endl;
-
-	ConnectionServer connection(std::move(client), freeRam / 4);
+	ConnectionServer connection(client);
 	try {
+		connection.init();
 
-	connection.init();
+		const auto message = connection.receiveInternal();
 
-	const auto message = connection.receiveInternal();
-
-	std::cout << "main: received message: " << message << std::endl;
-	//sleep(10);
-	if ( message == "command:UPLOAD" )
-		receiveFile(connection, settings);
-	else if ( message == "command:DOWNLOAD" )
-		sendFile(connection);
-	else if ( message == "command:REMOVE" )
-		removeFile(connection);
+		std::cout << "main: received message: " << message << std::endl;
+		//sleep(10);
+		if ( message == "command:UPLOAD" )
+			receiveFile(connection, settings);
+		else if ( message == "command:DOWNLOAD" )
+			sendFile(connection);
+		else if ( message == "command:REMOVE" )
+			removeFile(connection);
 	} catch ( const std::exception& e ) {
 		std::cerr << "main: error serving client: " << e.what() << std::endl;
 	}

@@ -10,24 +10,30 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		return;
 	}
 
-	// we will send the file in chunks of 128KB
-	constexpr size_t chunkSize = 4 * 1024 * 1024;
-	const auto buffer = std::make_unique<char[]>(chunkSize);
+	const auto freeRam = getFreeMemory();
 
-	const unsigned long long totalChunks = fileSize / chunkSize + 1;
-	const size_t lastChunkSize = fileSize % chunkSize;
+
+	size_t chunkSize = 1024 * 1024;
+	auto buffer = std::make_unique<char[]>(chunkSize);
+
+	unsigned long long totalChunks = fileSize / chunkSize + 1;
+	size_t lastChunkSize = fileSize % chunkSize;
 
 	double readSpeed = 0.0, uploadSpeed = 0.0;
 
 	double totalTimeRead = 0.0, totalTimeUpload = 0.0;
 
-	long long sizeRead = 0;
+	unsigned long long sizeRead = 0;
 	unsigned long long sizeUploaded = 0;
 
 	std::cout << colorize("Starting upload of size: ", Color::BLUE) << colorize(
 		humanReadableSize(fileSize), Color::CYAN) << "\n" << std::endl;
 
-	for ( unsigned long long i = 0; i < totalChunks - 1; ++i ) {
+	while ( true ) {
+
+		if ( sizeRead + chunkSize >= static_cast<unsigned long long>(fileSize) )
+			break;
+
 		auto startReadTime = std::chrono::high_resolution_clock::now();
 		file.read(buffer.get(), chunkSize);
 		auto endReadTime = std::chrono::high_resolution_clock::now();
@@ -35,13 +41,13 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		std::chrono::duration<double> duration = endReadTime - startReadTime;
 
 		totalTimeRead += duration.count();
-		sizeRead += chunkSize;
+		sizeRead += file.gcount();
 
 		readSpeed = static_cast<double>(sizeRead) / totalTimeRead;
 
 		auto startUploadTime = std::chrono::high_resolution_clock::now();
 
-		connection.send(std::string(buffer.get(), chunkSize));
+		connection.send(std::string(buffer.get(), file.gcount()));
 
 		auto endUploadTime = std::chrono::high_resolution_clock::now();
 
@@ -55,22 +61,59 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 		if ( connection.receiveInternal() != "confirm" )
 			throw std::runtime_error("Server did not confirm the chunk");
 
+		const unsigned long long i = sizeRead / chunkSize;
+
+#ifdef HIKUP_DEBUG
 		std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
-				colorize(humanReadableSize(( i + 1 ) * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) +
-				colorize(humanReadableSize(( totalChunks + 1 ) * chunkSize), Color::CYAN) + colorize(
+				colorize(humanReadableSize(( i ) * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) +
+				colorize(humanReadableSize( totalChunks * chunkSize), Color::CYAN) + colorize(
 					std::string(" (") +
-					std::to_string(( static_cast<double>(i + 1) / static_cast<double>(totalChunks) ) * 100.0).
+					std::to_string(( static_cast<double>( i ) / static_cast<double>(totalChunks) ) * 100.0).
+					substr(0, 5) + " %)",
+					Color::PURPLE) + " ┃ " + colorize("Read: " + humanReadableSpeed(readSpeed), Color::LL_BLUE) + " ━━ "
+				+ colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " + "| DEBUG | chunk size: " + humanReadableSize(chunkSize) << std::flush;
+#else
+		std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
+				colorize(humanReadableSize(( i ) * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) +
+				colorize(humanReadableSize( totalChunks * chunkSize), Color::CYAN) + colorize(
+					std::string(" (") +
+					std::to_string(( static_cast<double>( i ) / static_cast<double>(totalChunks) ) * 100.0).
 					substr(0, 5) + " %)",
 					Color::PURPLE) + " ┃ " + colorize("Read: " + humanReadableSpeed(readSpeed), Color::LL_BLUE) + " ━━ "
 				+ colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
+#endif
+
+		// adjust chunk size based on duration
+		if (duration.count() > 1.2) {
+			chunkSize -= chunkSize/25; // decrease chunk size by 4%
+			buffer = std::make_unique<char[]>(chunkSize);
+			totalChunks = fileSize / chunkSize + 1;
+			lastChunkSize = fileSize % chunkSize;
+		}
+
+		if (duration.count() < 0.8  && freeRam >= chunkSize * 2) {
+			chunkSize += chunkSize/50; // increase chunk size by 2%
+			buffer = std::make_unique<char[]>(chunkSize);
+			totalChunks = fileSize / chunkSize + 1;
+			lastChunkSize = fileSize % chunkSize;
+		}
 	}
 
 	file.read(buffer.get(), static_cast<std::streamsize>(lastChunkSize));
 	connection.send(std::string(buffer.get(), lastChunkSize));
+
+#ifdef HIKUP_DEBUG
 	std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
-			colorize(humanReadableSize(totalChunks * chunkSize), Color::CYAN) + colorize("/", Color::BLUE) + colorize(
-				humanReadableSize(totalChunks * chunkSize),
+			colorize(humanReadableSize( (( totalChunks - 1 ) * chunkSize) + lastChunkSize ), Color::CYAN) + colorize("/", Color::BLUE) + colorize(
+				humanReadableSize( (( totalChunks - 1 ) * chunkSize) + lastChunkSize ),
+				Color::CYAN) + colorize(" (100 %)  ", Color::PURPLE) + "| DEBUG | chunk size: " + humanReadableSize(chunkSize) << std::endl;
+#else
+	std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
+			colorize(humanReadableSize( (( totalChunks - 1 ) * chunkSize) + lastChunkSize ), Color::CYAN) + colorize("/", Color::BLUE) + colorize(
+				humanReadableSize( (( totalChunks - 1 ) * chunkSize) + lastChunkSize ),
 				Color::CYAN) + colorize(" (100 %)  ", Color::PURPLE) << std::endl;
+#endif
+
 
 	if ( connection.receiveInternal() != "confirm" )
 		throw std::runtime_error("Server did not confirm the chunk");
@@ -177,13 +220,17 @@ int start( int argc, char* argv[] ) {
 			fileSize = _fileSize;
 			fileName = _fileName;
 
-			std::cout << colorize("Computing hash", Color::GREEN) << std::endl;
-			hash = computeHash(file);
+			const auto toAllocate = std::min(getFreeMemory()/4, static_cast<unsigned long>(fileSize / 16));
+
+			std::cout << colorize("Computing hash by chunks of size: ", Color::GREEN) << colorize(humanReadableSize(toAllocate), Color::CYAN) << std::endl;
+			hash = computeHash(file, toAllocate, fileSize);
 			std::cout << colorize("Hash computed", Color::GREEN) << std::endl;
 		}
 
 		std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
+
 		connection.connectToServer(argv[3], 6998);
+
 		std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
 	}
 	catch ( std::runtime_error& e ) {

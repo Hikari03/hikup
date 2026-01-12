@@ -37,11 +37,14 @@
 #endif
 
 
+
+
 /**
  * @brief Handles the connection to the server
  */
 class Connection {
 public:
+
 	explicit Connection ( unsigned long bufferSize = 4*1024*1024 );
 
 	~Connection ();
@@ -62,7 +65,7 @@ public:
 
 	std::string receiveData ();
 
-	size_t connectionSpeed ();
+	void resizeBuffer ( unsigned long newSize );
 
 	void close ();
 

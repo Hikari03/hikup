@@ -18,6 +18,7 @@ struct Settings {
 	bool wantHttp = false;
 };
 
+
 inline std::ostream& operator << ( std::ostream& os, const Settings& settings) {
 	os << "settings: \n"
 	<< "  wantHttpServer: " << ( settings.wantHttp ? "true" : "false" ) << "\n"
@@ -53,7 +54,7 @@ inline std::string binToHex ( const unsigned char* bin, const size_t size ) {
 
 	sodium_bin2hex(hex.get(), size * 2 + 1, bin, size);
 
-	return {hex.get(), size * 2};;
+	return {hex.get(), size * 2};
 }
 
 inline Settings loadSettings () {

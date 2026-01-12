@@ -4,7 +4,10 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 #include <sys/socket.h>
+
+ConnectionServer::ConnectionServer ( ClientInfo clientInfo ) : ConnectionServer(std::move(clientInfo), 4 * 1024 * 1024) {}
 
 ConnectionServer::ConnectionServer ( ClientInfo clientInfo, const unsigned long bufferSize )
 	: _buffer(std::make_unique<char[]>(bufferSize)), _clientInfo(std::move(clientInfo)), _bufferSize(bufferSize) {}
@@ -94,7 +97,7 @@ std::string ConnectionServer::receive () {
 				throw std::runtime_error("timeout");
 		}
 
-		_message += _buffer.get();
+		_message += std::string(_buffer.get(), _sizeOfPreviousMessage);
 
 		//std::cout << "RECEIVE |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << _message << std::endl;
 	}
@@ -155,6 +158,11 @@ std::string ConnectionServer::receiveData () {
 	return message.substr(strlen(_data));
 }
 
+void ConnectionServer::resizeBuffer ( const unsigned long newSize )  {
+	_buffer = std::make_unique<char[]>(newSize);
+	_bufferSize = newSize;
+}
+
 void ConnectionServer::send ( const std::string& message ) const {
 	auto messageToSend = message;
 
@@ -167,7 +175,7 @@ void ConnectionServer::send ( const std::string& message ) const {
 	if ( !_active )
 		return;
 	try {
-		if ( ::send(_clientInfo.socket_, messageToSend.c_str(), messageToSend.length(), 0) < 0 ) {
+		if ( ::send(_clientInfo.socket_, messageToSend.data(), messageToSend.length(), 0) < 0 ) {
 			throw std::runtime_error("Could not send message to client");
 		}
 	}
@@ -181,7 +189,7 @@ void ConnectionServer::sendInternal ( const std::string& message ) const { send(
 void ConnectionServer::secretSeal ( std::string& message ) const {
 	const auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
 
-	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.c_str()), message.size(),
+	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.data()), message.size(),
 	                     _remotePublicKey) < 0 )
 		throw std::runtime_error("Could not encrypt message");
 
@@ -196,7 +204,7 @@ void ConnectionServer::secretSeal ( std::string& message ) const {
 void ConnectionServer::secretOpen ( std::string& message ) const {
 	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
 
-	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.c_str()),
+	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.data()),
 	                    message.size(), nullptr, nullptr, nullptr) < 0 )
 		throw std::runtime_error("Could not decode message");
 
