@@ -35,11 +35,15 @@ void signalHandler ( const int signal ) {
 }
 
 void receiveFile ( ConnectionServer& connection, const Settings& settings ) {
-	const auto size = stoll(connection.receiveInternal().substr(strlen("size:")));
+	const auto fileSize = stoll(connection.receiveInternal().substr(strlen("size:")));
 	auto fileName = connection.receiveInternal().substr(strlen("filename:"));
 	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
 
 	const auto oldFileName = fileName;
+
+	auto freeRam = std::min(getFreeMemory() / 4, static_cast<unsigned long>(fileSize / 16));
+
+	connection.resizeBuffer(freeRam);
 
 	// convert all '.' to '$' in the filename
 	std::ranges::replace(fileName, '.', '<');
@@ -59,7 +63,7 @@ void receiveFile ( ConnectionServer& connection, const Settings& settings ) {
 
 	std::ofstream file(_path, std::ios::binary);
 
-	std::cout << "main: starting download of size: " << size << std::endl;
+	std::cout << "main: starting download of size: " << fileSize << std::endl;
 
 	std::string message;
 	long long sizeWritten = 0;
@@ -73,21 +77,22 @@ void receiveFile ( ConnectionServer& connection, const Settings& settings ) {
 		catch ( const std::exception& e ) {
 			std::cerr << "main: error receiving message: " << e.what() << std::endl;
 			file.close();
-			std::filesystem::remove(fileName);
+			std::filesystem::remove(_path);
+			connection.sendInternal("fail");
 			return;
 		}
 
 		if ( message.starts_with(_internal"DONE") )
 			break;
 
-		file.write(message.c_str(), message.size());
+		file.write(message.data(), message.size());
 		sizeWritten += message.size();
 
 		connection.sendInternal("confirm");
 
-		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.c_str()), message.size());
+		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.data()), message.size());
 
-		std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(size) <<
+		std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(fileSize) <<
 				" bytes written" << std::flush;
 	}
 	std::cout << std::endl;
@@ -127,34 +132,63 @@ void sendFile ( ConnectionServer& connectionServer ) {
 		return;
 	}
 
+	const auto freeRam = getFreeMemory() / 4;
+
 	connectionServer.sendInternal("OK");
 
-	auto fileSize = std::filesystem::file_size(fileName);
+	const auto fileSize = std::filesystem::file_size(fileName);
 
-	constexpr size_t chunkSize = 256 * 1024;
+	size_t chunkSize = 4 * 1024 * 1024;
 	auto buffer = std::make_unique<char[]>(chunkSize);
-
-	const unsigned long long totalChunks = fileSize / chunkSize + 1;
-	const size_t lastChunkSize = fileSize % chunkSize;
 
 	connectionServer.sendInternal(std::to_string(fileSize));
 
-	auto clientFileName = fileName.substr(0, fileName.find_last_of('.'));
+	auto lastOfSlash = fileName.find_last_of('/');
+	auto lastOfDot = fileName.find_last_of('.');
+
+	auto clientFileName = fileName.substr(lastOfSlash+1, lastOfDot - lastOfSlash-1 );
 	std::ranges::replace(clientFileName, '<', '.');
 
 	connectionServer.sendInternal(clientFileName);
 
-	for ( unsigned long long i = 0; i < totalChunks - 1; ++i ) {
+	std::cout << "main: starting upload of size: " << humanReadableSize(fileSize) << std::endl;
+
+	size_t sizeRead = 0;
+
+	while ( true ) {
 		file.read(buffer.get(), chunkSize);
-		connectionServer.send(std::string(buffer.get(), chunkSize));
+
+		const auto startUploadTime = std::chrono::high_resolution_clock::now();
+		connectionServer.send(std::string(buffer.get(), file.gcount()));
+		const auto endUploadTime = std::chrono::high_resolution_clock::now();
+
+		std::chrono::duration<double> duration = endUploadTime - startUploadTime;
+
+		sizeRead += file.gcount();
+
 		if ( connectionServer.receiveInternal() != "confirm" )
 			throw std::runtime_error("main: client did not confirm the chunk");
-	}
 
-	file.read(buffer.get(), static_cast<std::streamsize>(lastChunkSize));
-	connectionServer.send(std::string(buffer.get(), lastChunkSize));
-	if ( connectionServer.receiveInternal() != "confirm" )
-		throw std::runtime_error("main: client did not confirm the chunk");
+		if ( sizeRead == static_cast<unsigned long long>(fileSize) )
+			break;
+
+		// adjust chunk size based on duration
+		if (duration.count() > 1.4) {
+			// decrease chunkSize by 2%, ensure integer rounding
+			chunkSize = static_cast<int>(chunkSize * 0.75);
+
+			buffer = std::make_unique<char[]>(chunkSize);
+		}
+		else if ( duration.count() < 0.3 && freeRam >= chunkSize * 2 ) {
+			chunkSize = static_cast<int>(chunkSize * 2);
+			buffer = std::make_unique<char[]>(chunkSize);
+
+		}
+		else if ( duration.count() < 0.6 && freeRam >= chunkSize * 2 ) {
+			chunkSize = static_cast<int>(chunkSize * 1.25);
+			buffer = std::make_unique<char[]>(chunkSize);
+		}
+	}
 
 	connectionServer.sendInternal("DONE");
 }
@@ -189,21 +223,20 @@ void removeFile ( ConnectionServer& connectionServer ) {
 void serveConnection ( ClientInfo client, const Settings& settings ) {
 	std::cout << "main: serving client " << client.getIp() << std::endl;
 
-	ConnectionServer connection(std::move(client));
+	ConnectionServer connection(client);
 	try {
+		connection.init();
 
-	connection.init();
+		const auto message = connection.receiveInternal();
 
-	const auto message = connection.receiveInternal();
-
-	std::cout << "main: received message: " << message << std::endl;
-	//sleep(10);
-	if ( message == "command:UPLOAD" )
-		receiveFile(connection, settings);
-	else if ( message == "command:DOWNLOAD" )
-		sendFile(connection);
-	else if ( message == "command:REMOVE" )
-		removeFile(connection);
+		std::cout << "main: received message: " << message << std::endl;
+		//sleep(10);
+		if ( message == "command:UPLOAD" )
+			receiveFile(connection, settings);
+		else if ( message == "command:DOWNLOAD" )
+			sendFile(connection);
+		else if ( message == "command:REMOVE" )
+			removeFile(connection);
 	} catch ( const std::exception& e ) {
 		std::cerr << "main: error serving client: " << e.what() << std::endl;
 	}

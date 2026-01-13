@@ -77,9 +77,9 @@ void HTTPFileServer::_ev_handler ( mg_connection* c, const int ev, void* ev_data
 				mg_http_reply(c, 404, "", "File not found");
 				return;
 			}
-			char buf[10] = {0};
-			if (mg_http_get_var(&hm->query, "inplace", buf, sizeof(buf)) <= 0) {
-				// Default to download if 'inplace' parameter is not present
+			char buf[4] = {0};
+			if (mg_http_get_var(&hm->query, "view", buf, sizeof(buf)) <= 0) {
+				// Default to download if 'view' parameter is not present
 				strcpy(buf, "no");
 			}
 

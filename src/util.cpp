@@ -1,7 +1,10 @@
 #include <filesystem>
 #include <fstream>
-#include <string>
+#include <iostream>
 #include <sodium.h>
+#include <string>
+#include <sys/sysinfo.h>
+
 
 #include "Color.cpp"
 
@@ -11,7 +14,7 @@
  * @param path
  * @return input file stream of the resolved path and its size
  */
-inline std::tuple<std::ifstream, std::ifstream::pos_type, std::string> resolveFile ( const std::string& path ) {
+inline std::tuple<std::ifstream, uintmax_t, std::string> resolveFile ( const std::string& path ) {
 	std::filesystem::path _path = std::filesystem::absolute(path); // Resolves the absolute path of the input file
 
 	if ( is_directory(_path) )
@@ -25,10 +28,7 @@ inline std::tuple<std::ifstream, std::ifstream::pos_type, std::string> resolveFi
 	if ( !file.is_open() || !file.good() )
 		throw std::runtime_error("Could not open file");
 
-	file.seekg(0, std::ios::end);
-	auto size = file.tellg();
-
-	file.seekg(0, std::ios::beg);
+	auto size = std::filesystem::file_size(_path);
 
 	return {std::move(file), size, _path.filename()};
 }
@@ -51,7 +51,7 @@ inline std::string colorize ( const std::string& text, Color color ) {
 	}
 }
 
-inline std::string humanReadableSize ( std::ifstream::pos_type size ) {
+inline std::string humanReadableSize ( const size_t size ) {
 	const char* units[] = {"B", "KB", "MB", "GB", "TB"};
 	auto sizeDouble = static_cast<double>(size);
 	size_t unitIndex = 0;
@@ -85,7 +85,7 @@ inline std::string humanReadableSpeed ( double speed ) {
 }
 
 inline std::string binToHex ( const unsigned char* bin, const size_t size ) {
-	auto hex = std::make_unique<char[]>(size * 2 + 1);
+	const auto hex = std::make_unique<char[]>(size * 2 + 1);
 
 	sodium_bin2hex(hex.get(), size * 2 + 1, bin, size);
 
@@ -100,32 +100,51 @@ inline std::pair<unsigned char*, size_t> hexToBin ( const std::string& hex ) {
 	return {bin.get(), hex.size() / 2};
 }
 
-inline std::string computeHash ( std::ifstream& file ) {
+inline unsigned long getFreeMemory () {
+	struct sysinfo memInfo{};
+	sysinfo(&memInfo);
+	return memInfo.bufferram + memInfo.freeram;
+}
+
+inline std::string computeHash ( std::ifstream& file, const size_t allocationSpace, const size_t fileSize ) {
 	file.seekg(0);
-	auto buffer = std::make_unique<char[]>(1024);
+	const auto buffer = std::make_unique<char[]>(allocationSpace);
 	unsigned char hash[crypto_generichash_BYTES];
 	crypto_generichash_state state;
 	crypto_generichash_init(&state, nullptr, 0, sizeof hash);
 
 	while ( true ) {
-		auto bytesRead = file.readsome(buffer.get(), 1024);
+		file.read(buffer.get(), allocationSpace);
 
-		if ( bytesRead == 0 ) {
+		if ( file.gcount() == 0 ) {
 			if ( file.fail() )
 				throw std::runtime_error("Error reading file.");
 			break;
 		}
+
 		else {
 			// Update hash with the bytes read
 			crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(buffer.get()),
-			                          static_cast<size_t>(bytesRead));
+			                          file.gcount());
 		}
+
+		if ( file.eof() )
+			break;
+
+		std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) +
+				colorize(humanReadableSize(static_cast<size_t>(file.tellg())) + '/'+ humanReadableSize(fileSize) + "         ", Color::CYAN) << std::flush;
+
 	}
 
 	crypto_generichash_final(&state, hash, sizeof hash);
+
+	std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) +
+				colorize(humanReadableSize(fileSize) + '/'+ humanReadableSize(fileSize), Color::CYAN) << std::endl;
 
 	file.clear();
 	file.seekg(0);
 
 	return binToHex(hash, sizeof hash);
 }
+
+

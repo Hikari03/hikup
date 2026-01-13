@@ -14,7 +14,7 @@
     3. Recipients can use the hash to download the file directly from the server using the `hikup` command or with HTTP.
 
 > [!NOTE]
-> If you append `?inplace=yes` to the HTTP link, you can view the file directly in the browser.
+> If you append `?view=yes` to the HTTP link, you can view the file directly in the browser.
 
 ## Dependencies
 ### Shared

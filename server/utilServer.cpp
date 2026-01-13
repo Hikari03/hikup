@@ -5,6 +5,7 @@
 #include <memory>
 #include <sodium.h>
 #include <string>
+#include <sys/sysinfo.h>
 
 #include "includes/toml.hpp"
 
@@ -16,6 +17,7 @@ struct Settings {
 	std::string httpProtocol;
 	bool wantHttp = false;
 };
+
 
 inline std::ostream& operator << ( std::ostream& os, const Settings& settings) {
 	os << "settings: \n"
@@ -52,25 +54,25 @@ inline std::string binToHex ( const unsigned char* bin, const size_t size ) {
 
 	sodium_bin2hex(hex.get(), size * 2 + 1, bin, size);
 
-	return {hex.get(), size * 2};;
+	return {hex.get(), size * 2};
 }
 
 inline Settings loadSettings () {
-
 	toml::parse_result settings;
 
-	try {
-		settings = toml::parse_file("settings/settings.toml");
-	} catch ( const toml::parse_error& err ) {
-		std::cerr
-		<< "Error parsing file '" << *err.source().path
-		<< "':\n" << err.description()
-		<< "\n (" << err.source().begin << ")\n";
-		throw std::runtime_error("Could not load settings from " + (std::filesystem::current_path() /"settings"/"settings.toml").string());
+	try { settings = toml::parse_file("settings/settings.toml"); }
+	catch ( const toml::parse_error& err ) {
+		std::cerr << "Error parsing file '" << *err.source().path << "':\n" << err.description() << "\n (" << err.
+				source().begin << ")\n";
+		throw std::runtime_error(
+			"Could not load settings from " + ( std::filesystem::current_path() / "settings" / "settings.toml" ).
+			string());
 	}
 
 	if ( settings.empty() ) {
-		throw std::runtime_error("Could not load settings from " + (std::filesystem::current_path() /"settings"/"settings.toml").string());
+		throw std::runtime_error(
+			"Could not load settings from " + ( std::filesystem::current_path() / "settings" / "settings.toml" ).
+			string());
 	}
 
 	Settings result;
@@ -86,4 +88,10 @@ inline Settings loadSettings () {
 	}
 
 	return result;
+}
+
+inline unsigned long getFreeMemory () {
+	struct sysinfo memInfo{};
+	sysinfo(&memInfo);
+	return memInfo.bufferram + memInfo.freeram;
 }

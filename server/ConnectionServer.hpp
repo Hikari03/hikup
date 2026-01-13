@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <memory>
 #include <sodium.h>
 
 #include "ClientInfo.hpp"
@@ -11,9 +12,14 @@
 #define _data "DATA::"
 
 
+
+
 class ConnectionServer {
 public:
+
 	explicit ConnectionServer ( ClientInfo clientInfo );
+
+	ConnectionServer ( ClientInfo clientInfo, unsigned long bufferSize );
 
 	~ConnectionServer ();
 
@@ -31,20 +37,30 @@ public:
 
 	std::string receiveData ();
 
-private:
-	char _buffer[256*1024+1] = {0};
-	std::vector<std::string> _messagesBuffer;
-	ClientInfo _clientInfo;
+	void resizeBuffer ( unsigned long newSize );
 
+	struct ConnectionSpeed {
+		size_t uploadSpeed = 0;
+		size_t downloadSpeed = 0;
+	};
+
+private:
 	struct KeyPair {
 		unsigned char publicKey[crypto_box_PUBLICKEYBYTES];
 		unsigned char secretKey[crypto_box_SECRETKEYBYTES];
 	};
 
-	int _sizeOfPreviousMessage = 0;
+	std::unique_ptr<char[]> _buffer;
+	KeyPair _keyPair;
+	ClientInfo _clientInfo;
+	std::vector<std::string> _messagesBuffer;
+	ConnectionSpeed _connectionSpeed;
+
+
+	long int _sizeOfPreviousMessage = 0;
+	unsigned long _bufferSize = 4*1024*1024;
 	std::string _message;
 
-	KeyPair _keyPair;
 	unsigned char _remotePublicKey[crypto_box_PUBLICKEYBYTES];
 	bool _active = true;
 	bool _encrypted = false;
@@ -52,9 +68,11 @@ private:
 
 	void initEncryption ();
 
-	void clearBuffer ();
+	void clearBuffer () const;
 
 	void secretOpen ( std::string& message ) const;
 
 	void secretSeal ( std::string& message ) const;
+
+	void _handleConnSpeedTest ();
 };

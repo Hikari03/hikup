@@ -6,7 +6,8 @@ namespace Command {
 	enum class Type {
 		UPLOAD,
 		DOWNLOAD,
-		REMOVE
+		REMOVE,
+		INVALID
 	};
 
 	inline std::string toString ( const Type command ) {
@@ -17,6 +18,8 @@ namespace Command {
 				return "DOWNLOAD";
 			case Type::REMOVE:
 				return "REMOVE";
+			case Type::INVALID:
+				return "INVALID";
 			default: // cannot happen
 				return "";
 		}
@@ -30,6 +33,6 @@ namespace Command {
 		if ( command == "rm" )
 			return Type::REMOVE;
 
-		throw std::runtime_error("Invalid command: " + command);
+		return Type::INVALID;
 	}
 }
