@@ -14,7 +14,7 @@
  * @param path
  * @return input file stream of the resolved path and its size
  */
-inline std::tuple<std::ifstream, std::ifstream::pos_type, std::string> resolveFile ( const std::string& path ) {
+inline std::tuple<std::ifstream, uintmax_t, std::string> resolveFile ( const std::string& path ) {
 	std::filesystem::path _path = std::filesystem::absolute(path); // Resolves the absolute path of the input file
 
 	if ( is_directory(_path) )
@@ -28,10 +28,7 @@ inline std::tuple<std::ifstream, std::ifstream::pos_type, std::string> resolveFi
 	if ( !file.is_open() || !file.good() )
 		throw std::runtime_error("Could not open file");
 
-	file.seekg(0, std::ios::end);
-	auto size = file.tellg();
-
-	file.seekg(0, std::ios::beg);
+	auto size = std::filesystem::file_size(_path);
 
 	return {std::move(file), size, _path.filename()};
 }
@@ -106,7 +103,7 @@ inline std::pair<unsigned char*, size_t> hexToBin ( const std::string& hex ) {
 inline unsigned long getFreeMemory () {
 	struct sysinfo memInfo{};
 	sysinfo(&memInfo);
-	return memInfo.freeram;
+	return memInfo.bufferram + memInfo.freeram;
 }
 
 inline std::string computeHash ( std::ifstream& file, const size_t allocationSpace, const size_t fileSize ) {

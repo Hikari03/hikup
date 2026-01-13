@@ -93,5 +93,5 @@ inline Settings loadSettings () {
 inline unsigned long getFreeMemory () {
 	struct sysinfo memInfo{};
 	sysinfo(&memInfo);
-	return memInfo.freeram;
+	return memInfo.bufferram + memInfo.freeram;
 }
