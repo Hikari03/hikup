@@ -109,6 +109,10 @@ std::string Connection::_receive () {
 			throw std::runtime_error("Could not receive message from server: " + std::string(strerror(errno)));
 		}
 
+		if ( _sizeOfPreviousMessage == 0 ) {
+			throw std::runtime_error("server disconnected");
+		}
+
 		message += std::string(_buffer.get(), _sizeOfPreviousMessage);
 	}
 
