@@ -16,6 +16,8 @@
 #include "HTTPFileServer.hpp"
 #include "terminal.cpp"
 #include "utilServer.cpp"
+#include "../shared/FileInfo.hpp"
+#include "../shared/utils.hpp"
 #include "includes/toml.hpp"
 
 sig_atomic_t stopRequested = 0;
@@ -53,7 +55,7 @@ void receiveFile ( ConnectionServer& connection, const Settings& settings ) {
 	std::cout << _path << std::endl;
 
 	if ( std::filesystem::exists(_path) ) {
-		std::cout << "main: file already exists" << std::endl;
+		std::cout << "receiveFile: file already exists" << std::endl;
 		connection.sendInternal("NO");
 		connection.sendInternal(settings.httpProtocol + "://" + settings.hostname + "/" + oldFileName);
 		return;
@@ -63,7 +65,7 @@ void receiveFile ( ConnectionServer& connection, const Settings& settings ) {
 
 	std::ofstream file(_path, std::ios::binary);
 
-	std::cout << "main: starting download of size: " << fileSize << std::endl;
+	std::cout << "receiveFile: starting download of size: " << fileSize << std::endl;
 
 	std::string message;
 	long long sizeWritten = 0;
@@ -75,7 +77,7 @@ void receiveFile ( ConnectionServer& connection, const Settings& settings ) {
 	while ( true ) {
 		try { message = connection.receive(); }
 		catch ( const std::exception& e ) {
-			std::cerr << "main: error receiving message: " << e.what() << std::endl;
+			std::cerr << "receiveFile: error receiving message: " << e.what() << std::endl;
 			file.close();
 			std::filesystem::remove(_path);
 			connection.sendInternal("fail");
@@ -119,7 +121,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 			fileName = file.path();
 
 	if ( fileName.empty() ) {
-		std::cout << "main: file not found" << std::endl;
+		std::cout << "sendFile: file not found" << std::endl;
 		connectionServer.sendInternal("NO");
 		return;
 	}
@@ -127,7 +129,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 	std::ifstream file(fileName, std::ios::binary);
 
 	if ( !file.good() ) {
-		std::cout << "main: could not open file" << std::endl;
+		std::cout << "sendFile: could not open file" << std::endl;
 		connectionServer.sendInternal("NO");
 		return;
 	}
@@ -151,7 +153,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 
 	connectionServer.sendInternal(clientFileName);
 
-	std::cout << "main: starting upload of size: " << humanReadableSize(fileSize) << std::endl;
+	std::cout << "sendFile: starting upload of size: " << humanReadableSize(fileSize) << std::endl;
 
 	size_t sizeRead = 0;
 
@@ -167,7 +169,7 @@ void sendFile ( ConnectionServer& connectionServer ) {
 		sizeRead += file.gcount();
 
 		if ( connectionServer.receiveInternal() != "confirm" )
-			throw std::runtime_error("main: client did not confirm the chunk");
+			throw std::runtime_error("sendFile: client did not confirm the chunk");
 
 		if ( sizeRead == static_cast<unsigned long long>(fileSize) )
 			break;
@@ -203,7 +205,7 @@ void removeFile ( ConnectionServer& connectionServer ) {
 			fileName = file.path();
 
 	if ( fileName.empty() ) {
-		std::cout << "main: file not found: " << fileName << std::endl;
+		std::cout << "removeFile: file not found: " << fileName << std::endl;
 		connectionServer.sendInternal("NO");
 		return;
 	}
@@ -212,12 +214,46 @@ void removeFile ( ConnectionServer& connectionServer ) {
 	std::ranges::replace(symlinkName, '<', '.');
 
 
-	std::cout << "main: removing files: " << (std::filesystem::current_path() / "links" / symlinkName) << ", " << fileName << std::endl;
+	std::cout << "removeFile: removing files: " << (std::filesystem::current_path() / "links" / symlinkName) << ", " << fileName << std::endl;
 
 	std::filesystem::remove(std::filesystem::current_path() / "links" / symlinkName);
 	std::filesystem::remove(fileName);
 
 	connectionServer.sendInternal("OK");
+}
+
+void listFiles ( ConnectionServer& connection, const Settings& settings ) {
+
+	connection.sendInternal("OK");
+
+	std::string user = connection.receiveInternal();
+
+	if ( !user.starts_with("user:") )
+		throw std::runtime_error("listFiles: no user specified, got: " + user);
+
+	user = user.substr(strlen("user:") );
+
+	std::string pass = connection.receiveInternal();
+
+	if ( !pass.starts_with("pass:") )
+		throw std::runtime_error("listFiles: no pass specified, got: " + pass);
+
+	pass = pass.substr(strlen("user:"));
+
+	if ( user != settings.authUser || pass != settings.authPass ) {
+		std::cout << "Wrong Credentials: " << user << ", " << pass << std::endl;
+		connection.sendInternal("NOPE");
+		return;
+	}
+
+	connection.sendInternal("OK");
+
+	for ( const auto& file : std::filesystem::directory_iterator("storage") ) {
+		connection.sendData(FileInfo(file, true).encode());
+	}
+
+	connection.sendInternal("DONE");
+
 }
 
 void serveConnection ( ClientInfo client, const Settings& settings ) {
@@ -230,13 +266,14 @@ void serveConnection ( ClientInfo client, const Settings& settings ) {
 		const auto message = connection.receiveInternal();
 
 		std::cout << "main: received message: " << message << std::endl;
-		//sleep(10);
 		if ( message == "command:UPLOAD" )
 			receiveFile(connection, settings);
 		else if ( message == "command:DOWNLOAD" )
 			sendFile(connection);
 		else if ( message == "command:REMOVE" )
 			removeFile(connection);
+		else if ( message == "command:LIST")
+			listFiles(connection, settings);
 	} catch ( const std::exception& e ) {
 		std::cerr << "main: error serving client: " << e.what() << std::endl;
 	}

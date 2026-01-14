@@ -86,6 +86,7 @@ std::string ConnectionServer::receive () {
 		//std::cout << "RECEIVE BUFFER BEFORE CLEAR|  " << _clientInfo.socket_ << ": " << _buffer << std::endl;
 		clearBuffer();
 
+		// receive message with timeout
 		_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer.get(), _bufferSize, 0);
 
 
@@ -95,6 +96,10 @@ std::string ConnectionServer::receive () {
 
 			if ( errno == EAGAIN || errno == EWOULDBLOCK )
 				throw std::runtime_error("timeout");
+		}
+
+		if ( _sizeOfPreviousMessage == 0 ) {
+			throw std::runtime_error("client disconnected");
 		}
 
 		_message += std::string(_buffer.get(), _sizeOfPreviousMessage);

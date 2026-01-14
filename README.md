@@ -16,6 +16,13 @@
 > [!NOTE]
 > If you append `?view=yes` to the HTTP link, you can view the file directly in the browser.
 
+### Client Commands
+- `hikup`: Display help information about the commands.
+- `hikup up <file> <server-address>`: Upload a file.
+- `hikup down <file> <server-address>`: Download a file.
+- `hikup rm <file> <server-address>`: Remove a file.
+- `hikup ls <user> <pass> <server-address>`: List all files (requires authentication).
+
 ## Dependencies
 ### Shared
 - `cmake`, `libsodium`, `g++` with c++23 support
