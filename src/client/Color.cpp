@@ -4,5 +4,6 @@ enum class Color {
 	BLUE,
 	PURPLE,
 	CYAN,
-	LL_BLUE
+	LL_BLUE,
+	YELLOW
 };

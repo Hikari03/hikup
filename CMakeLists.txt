@@ -14,26 +14,36 @@ set(CMAKE_CXX_FLAGS_RELEASE  "${CMAKE_CXX_FLAGS_RELEASE} -Wall -Wextra -pedantic
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBSODIUM REQUIRED libsodium)
 
-add_executable(hikup src/main.cpp
-        src/Connection.hpp
-        src/Connection.cpp
-        src/util.cpp
-        src/CommandType.cpp
-        src/Color.cpp)
+add_executable(hikup src/client/main.cpp
+        src/client/Connection.hpp
+        src/client/Connection.cpp
+        src/client/util.cpp
+        src/client/CommandType.cpp
+        src/client/Color.cpp
+        src/shared/FileInfo.cpp
+        src/shared/FileInfo.hpp
+        src/shared/utils.cpp
+        src/shared/utils.cpp
+        src/shared/utils.hpp)
 
-add_executable(hikup-server server/main.cpp
-        server/terminal.cpp
-        server/accepter.cpp
-        server/ClientInfo.cpp
-        server/ClientInfo.hpp
-        server/ConnectionServer.cpp
-        server/ConnectionServer.hpp
-        server/utilServer.cpp
-        server/HTTPFileServer.cpp
-        server/HTTPFileServer.hpp
-        server/includes/mongoose.cpp
-        server/includes/mongoose.hpp
-        server/includes/toml.hpp)
+add_executable(hikup-server src/server/main.cpp
+        src/server/terminal.cpp
+        src/server/accepter.cpp
+        src/server/ClientInfo.cpp
+        src/server/ClientInfo.hpp
+        src/server/ConnectionServer.cpp
+        src/server/ConnectionServer.hpp
+        src/server/utilServer.cpp
+        src/server/HTTPFileServer.cpp
+        src/server/HTTPFileServer.hpp
+        src/server/includes/mongoose.cpp
+        src/server/includes/mongoose.hpp
+        src/server/includes/toml.hpp
+        src/shared/FileInfo.cpp
+        src/shared/FileInfo.hpp
+        src/shared/utils.cpp
+        src/shared/utils.cpp
+        src/shared/utils.hpp)
 
 target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hikup ${LIBSODIUM_LIBRARIES})

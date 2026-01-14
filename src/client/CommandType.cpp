@@ -7,6 +7,7 @@ namespace Command {
 		UPLOAD,
 		DOWNLOAD,
 		REMOVE,
+		LIST,
 		INVALID
 	};
 
@@ -18,6 +19,8 @@ namespace Command {
 				return "DOWNLOAD";
 			case Type::REMOVE:
 				return "REMOVE";
+			case Type::LIST:
+				return "LIST";
 			case Type::INVALID:
 				return "INVALID";
 			default: // cannot happen
@@ -30,6 +33,8 @@ namespace Command {
 			return Type::UPLOAD;
 		if ( command == "down" )
 			return Type::DOWNLOAD;
+		if ( command == "ls" )
+			return Type::LIST;
 		if ( command == "rm" )
 			return Type::REMOVE;
 

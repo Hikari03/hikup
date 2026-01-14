@@ -3,6 +3,8 @@
 #include "CommandType.cpp"
 #include "Connection.hpp"
 #include "util.cpp"
+#include "../shared/FileInfo.hpp"
+#include "../shared/utils.hpp"
 
 void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection ) {
     if ( !file.good() ) {
@@ -196,23 +198,111 @@ void downloadFile ( Connection& connection ) {
     std::cout << std::endl;
 }
 
-int start ( int argc, char* argv[] ) {
-    if ( argc < 4 ) {
-        std::cout << "Usage: " << argv[0] << " <up <file> | down <hash> | rm <hash>> <server> \n\n"
+int listFiles ( Connection& connection, const std::string& user, const std::string& pass ) {
+    connection.sendInternal("user:" + user);
+    connection.sendInternal("pass:" + pass);
+
+    if ( connection.receiveInternal() != "OK" ) {
+        std::cerr << colorize("Authentication failed", Color::RED) << std::endl;
+        return 1;
+    }
+
+    std::vector<FileInfo> files;
+    unsigned maxNameSize = 4, maxSizeSize = 4, maxDateSize = 11; // min sizes for headers
+
+    try {
+        std::string fileData;
+        while ( ( fileData = connection.receive() ) != _internal"DONE" ) {
+            FileInfo fileInfo(fileData.substr(strlen(_data)));
+            maxNameSize = std::max(maxNameSize, static_cast<unsigned>(fileInfo.getName().size()));
+            maxSizeSize = std::max(maxSizeSize, static_cast<unsigned>(humanReadableSize(fileInfo.getSize()).size()));
+            maxDateSize = std::max(maxDateSize, static_cast<unsigned>(fileInfo.getCreationDateString_c().size()));
+
+            files.emplace_back(fileInfo);
+        }
+    } catch ( std::runtime_error& e ) {
+        std::cerr << colorize("Error receiving file list: ", Color::RED) + colorize(e.what(), Color::RED) << std::endl;
+        return 1;
+    }
+
+    std::cout << padStringToSize("| Name", maxNameSize+2) + " | " +
+                padStringToSize("Size", maxSizeSize) + " | " +
+                padStringToSize("Upload Date", maxDateSize) + " | " +
+                padStringToSize("Hash", files[0].getHash().size()) + "\n";
+    std::cout << '|' + std::string(maxNameSize+2, '-') + "|" +
+                std::string(maxSizeSize+2, '-') + "|" +
+                std::string(maxDateSize+2, '-') + "|" +
+                std::string(files[0].getHash().size()+1, '-') + '\n';
+
+
+    for ( auto& file: files ) {
+        std::cout << "| " +
+            colorize(
+                padStringToSize(
+                    file.getName(),
+                    maxNameSize),
+                Color::CYAN) + " | " +
+            colorize(
+                padStringToSize(
+                    humanReadableSize(
+                        file.getSize()),
+                        maxSizeSize),
+                Color::LL_BLUE) + " | " +
+            colorize(file.getCreationDateString_c(), Color::GREEN) + " | " +
+            colorize(file.getHash(), Color::PURPLE) + '\n';
+    }
+
+    std::cout << '|' + std::string(maxNameSize+2, '-') + "|" +
+                std::string(maxSizeSize+2, '-') + "|" +
+                std::string(maxDateSize+2, '-') + "|" +
+                std::string(files[0].getHash().size()+1, '-') + "\n\n";
+
+    std::cout.flush();
+
+    return 0;
+}
+
+void printHelp ( const std::string& argv0 ) {
+    std::cout << "Usage: " << argv0 << " <up <file> | down <hash> | rm <hash> | ls <user> <pass>> <server> \n\n"
                 "If file is successfully uploaded, you will get file hash\n"
-                "which you need to input if you want to download it\n\n"
+                "which you need to input if you want to download it.\n\n"
+                "For ls command, provide username and password (from server settings).\n\n"
                 "If server has HTTP server, you will get link for download.\n"
                 "You can append '?inplace=yes' to the link to view the file in browser." << std::endl;
+}
+
+int start ( int argc, char* argv[] ) {
+    if ( argc < 4 ) {
+        printHelp(argv[0]);
         return 1;
     }
 
     auto command = Command::resolveCommand(argv[1]);
+
+    if ( command == Command::Type::INVALID ) {
+        std::cerr << colorize("Invalid command", Color::RED) << std::endl;
+        return 1;
+    }
+
+    if ( command == Command::Type::LIST && argc != 5 ) {
+        std::cerr << colorize("Invalid number of arguments for list command", Color::RED) << std::endl;
+        printHelp(argv[0]);
+        return 1;
+    }
 
     Connection connection;
     std::ifstream file;
     std::ifstream::pos_type fileSize;
     std::string fileName;
     std::string hash;
+    std::string serverAddr;
+
+    if ( command == Command::Type::LIST ) {
+        serverAddr = argv[4];
+    }
+    else {
+        serverAddr = argv[3];
+    }
 
     try {
         if ( command == Command::Type::UPLOAD ) {
@@ -232,7 +322,7 @@ int start ( int argc, char* argv[] ) {
 
         std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
 
-        connection.connectToServer(argv[3], 6998);
+        connection.connectToServer(serverAddr, 6998);
 
         std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
     }
@@ -261,6 +351,7 @@ int start ( int argc, char* argv[] ) {
             const auto httpLink = connection.receiveInternal();
             std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink, Color::CYAN) << std::endl;
         }
+
         else { std::cout << colorize("Reason: file does not exist", Color::RED) << std::endl; }
         return 1;
     }
@@ -277,6 +368,9 @@ int start ( int argc, char* argv[] ) {
         sendFile(file, fileSize, connection);
     else if ( command == Command::Type::DOWNLOAD )
         downloadFile(connection);
+    else if ( command == Command::Type::LIST ) {
+        return listFiles(connection, argv[2], argv[3]);
+    }
 
     return 0;
 }
