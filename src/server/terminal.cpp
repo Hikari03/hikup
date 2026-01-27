@@ -1,9 +1,7 @@
 #include <condition_variable>
 #include <iostream>
 
-#define _terminal "terminal: "
-
-inline void printT ( const std::string& message ) { std::cout << _terminal << message << std::endl; }
+#include "utils.hpp"
 
 inline void terminal ( std::condition_variable& callBack, bool& turnOff ) {
 	while ( !turnOff ) {
@@ -11,7 +9,7 @@ inline void terminal ( std::condition_variable& callBack, bool& turnOff ) {
 		std::cin >> input;
 		if ( input == "q" ) {
 			turnOff = true;
-			printT("turning off server, please wait up to 15 seconds");
+			Utils::log(std::string("terminal: ") + "turning off server, please wait up to 15 seconds");
 			callBack.notify_one();
 			return;
 		}

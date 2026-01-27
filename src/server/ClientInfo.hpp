@@ -16,12 +16,10 @@ struct ClientInfo {
 
 	static std::string convertAddrToString(const sockaddr_in & addr);
 
+private:
 	std::string ip;
 	int socket_ = 0;
 
 	bool initialized = false;
-
-private:
-	std::vector<std::string> onlineUsers;
 
 };

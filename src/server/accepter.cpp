@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "ClientInfo.hpp"
+#include "utils.hpp"
 
 inline void accepter ( std::condition_variable& callBack,
                        const int& serverSocket,
@@ -16,23 +17,22 @@ inline void accepter ( std::condition_variable& callBack,
 			sockaddr_in clientAddress{};
 			socklen_t clientAddressSize = sizeof( clientAddress );
 
-			acceptedClient.socket_ = accept(serverSocket, reinterpret_cast<struct sockaddr*>(&clientAddress),
+			const auto socket = accept(serverSocket, reinterpret_cast<struct sockaddr*>(&clientAddress),
 			                                &clientAddressSize);
 
 			if ( turnOff )
 				return;
 
-			if ( acceptedClient.socket_ < 0 )
+			if ( socket < 0 )
 				continue;
 
-			acceptedClient.ip = ClientInfo::convertAddrToString(clientAddress);
+			acceptedClient = ClientInfo();
+			acceptedClient.init(ClientInfo::convertAddrToString(clientAddress), socket);
 
-			std::cout << "main: accepted client number " << acceptedClient.socket_ << " with addr " << acceptedClient.ip
-					<< std::endl;
+			Utils::log("main: accepted client number " + std::to_string(acceptedClient.getSocket()) + " with addr " + acceptedClient.getIp());
 
 			newClientAccepted = true;
 			callBack.notify_one();
-			//std::cout << "main: accepted client number " << acceptedSocket << std::endl;
 		}
 	}
 }
