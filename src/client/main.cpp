@@ -268,7 +268,7 @@ void printHelp ( const std::string& argv0 ) {
                 "which you need to input if you want to download it.\n\n"
                 "For ls command, provide username and password (from server settings).\n\n"
                 "If server has HTTP server, you will get link for download.\n"
-                "You can append '?inplace=yes' to the link to view the file in browser." << std::endl;
+                "You can append '?view=yes' to the link to view the file in browser." << std::endl;
 }
 
 int start ( int argc, char* argv[] ) {

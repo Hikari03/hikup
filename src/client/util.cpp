@@ -64,13 +64,10 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 	while ( true ) {
 		file.read(buffer.get(), allocationSpace);
 
-
-
 		if ( file.gcount() == 0 )
 			break;
 
 
-		
 		// Update hash with the bytes read
 		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(buffer.get()),
 		                          file.gcount());
