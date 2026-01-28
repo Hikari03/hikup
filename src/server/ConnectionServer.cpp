@@ -20,7 +20,7 @@ ConnectionServer::~ConnectionServer () {
 
 void ConnectionServer::init () {
 	timeval timeout{};
-	timeout.tv_sec = 5; // Timeout in seconds
+	timeout.tv_sec = 20; // Timeout in seconds
 	timeout.tv_usec = 0; // Timeout in microseconds
 
 	if ( setsockopt(_clientInfo.getSocket(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {

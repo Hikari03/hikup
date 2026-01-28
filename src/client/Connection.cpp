@@ -46,7 +46,7 @@ void Connection::connectToServer ( std::string ip, const int port ) {
 	}
 
 	timeval timeout{};
-	timeout.tv_sec = 5; // Timeout in seconds
+	timeout.tv_sec = 20; // Timeout in seconds
 	timeout.tv_usec = 0; // Timeout in microseconds
 
 	if ( setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
