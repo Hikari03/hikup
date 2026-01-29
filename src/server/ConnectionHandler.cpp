@@ -104,6 +104,14 @@ void ConnectionHandler::_receiveFile ( ConnectionServer& connection ) const {
 
 	auto hashString = binToHex(hash, sizeof hash);
 
+	if (hashFromClient != hashString) {
+		std::filesystem::remove(_path);
+		connection.sendInternal("Sent hash and calculated hash do not match");
+		Utils::elog("Sent hash and calculated hash do not match");
+	}
+
+	connection.sendInternal("OK");
+
 	std::filesystem::create_symlink(_path, std::filesystem::current_path()/ "links" / oldFileName);
 
 	connection.sendInternal(hashString);
