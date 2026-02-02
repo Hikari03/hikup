@@ -1,21 +1,32 @@
 #include "Settings.hpp"
 
+#include "utils.hpp"
 #include "includes/toml.hpp"
+
+std::string operator+ ( const std::string& lhs, const toml::source_position& rhs ) {
+    std::stringstream rhs1;
+    rhs1 << lhs << rhs;
+    return rhs1.str();
+}
 
 Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
     toml::parse_result settings;
 
     try { settings = toml::parse_file(filePath.string()); }
     catch ( const toml::parse_error& err ) {
-        std::cerr << "Error parsing file '" << *err.source().path << "':\n" << err.description() << "\n (" << err.
-                source().begin << ")\n";
+        Utils::elog(
+            "Error parsing file '" + *err.source().path + "':\n" + std::string(err.description()) + "\n (" + err.
+            source().begin + ")\n"
+        );
         throw std::runtime_error(
-            "Could not load settings from " + filePath.string());
+            "Could not load settings from " + filePath.string()
+        );
     }
 
     if ( settings.empty() ) {
         throw std::runtime_error(
-            "Could not load settings from " + filePath.string());
+            "Could not load settings from " + filePath.string()
+        );
     }
 
     Settings result;
@@ -30,29 +41,56 @@ Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
         result.authPass = settings["auth"]["password"].as_string()->value_or("admin");
     }
 
+    if ( const auto syncTargets = settings["syncTargets"]["targets"].as_array() ) {
+        auto it = syncTargets->begin();
+        while ( it != syncTargets->end() ) {
+            const auto target = it->as_table();
+
+            result.syncTargets.emplace_back(
+                target->get("name")->as_string()->value_or("INVALID"),
+                target->get("address")->as_string()->value_or("INVALID"),
+                target->get("isMaster")->as_boolean()->value_or(false)
+            );
+
+            ++it;
+        }
+    }
+
+
     return result;
 }
 
 std::string Settings::toString () const {
+
     return std::string("settings: \n")
-    + "  wantHttpServer: " + ( wantHttp ? "true" : "false" ) + "\n"
-    + "  hostname: " + hostname + "\n"
-    + "  httpAddress: " + httpAddress + "\n"
-    + "  httpProtocol: " + httpProtocol + "\n"
-    + "auth: \n"
-    + "  user: " + authUser + "\n"
-    + "  password: " + authPass;
+            + "  wantHttpServer: " + ( wantHttp ? "true" : "false" ) + "\n"
+            + "  hostname: " + hostname + "\n"
+            + "  httpAddress: " + httpAddress + "\n"
+            + "  httpProtocol: " + httpProtocol + "\n"
+            + "auth: \n"
+            + "  user: " + authUser + "\n"
+            + "  password: " + authPass + "\n"
+            + [this]() -> std::string { // SyncTargets
+                if ( syncTargets.empty() ) {
+                    return "";
+                }
+
+                std::string result = "syncTargets:\n";
+
+                for ( const auto& [targetName, targetAddress, targetUser, targetPass, master] : syncTargets ) {
+                    result += "  " + targetName + ":\n";
+                    result += "    address: " + targetAddress + '\n';
+                    result += "    user: " + targetUser + '\n';
+                    result += "    pass: " + targetPass + '\n';
+                    result += "    we are: ";
+                    result += master ? "master" : "slave";
+                    result += "\n";
+                }
+                return result;
+            }();
+
 }
 
-std::ostream& operator << ( std::ostream& os, const Settings& settings) {
-    os << "settings: \n"
-    << "  wantHttpServer: " << ( settings.wantHttp ? "true" : "false" ) << "\n"
-    << "  hostname: " << settings.hostname << "\n"
-    << "  httpAddress: " << settings.httpAddress << "\n"
-    << "  httpProtocol: " << settings.httpProtocol << "\n"
-    << "auth: \n"
-    << "  user: " << settings.authUser << "\n"
-    << "  password: " << settings.authPass;
-
-    return os;
+std::ostream& operator << ( std::ostream& os, const Settings& settings ) {
+    return os << settings.toString();
 }

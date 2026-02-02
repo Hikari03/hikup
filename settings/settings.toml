@@ -7,3 +7,8 @@ wantHttpServer = true
 httpAddress = "http://0.0.0.0:6997" # bind address
 httpProtocol = "http" # external http or https, useful when behind reverse proxy
 hostname = "example.org" # external hostname only for printing http links
+
+[syncTargets]
+targets = [ # array of quintuplets of display name, address, remote user, remote pass and a bool value of whether this server is master, otherwise slave
+    { name = "exampleName", address = "example.org", user = "admin", pass = "admin", isMaster = true }
+]
