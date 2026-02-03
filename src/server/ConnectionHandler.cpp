@@ -239,6 +239,9 @@ void ConnectionHandler::_sendFile ( ConnectionServer& connection ) {
 }
 
 void ConnectionHandler::_removeOnSynced ( const std::string& hash ) const {
+    if (settings.syncTargets.empty())
+        return;
+
     if ( Utils::addIntoArrInToml({"settings/toRemove.toml"}, hash) )
         Utils::elog("Could not add hash for later deletion");
 
