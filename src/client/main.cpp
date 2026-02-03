@@ -1,7 +1,7 @@
 #include <iostream>
 
 #include "CommandType.cpp"
-#include "Connection.hpp"
+#include "../shared/Connection.hpp"
 #include "util.cpp"
 #include "../shared/FileInfo.hpp"
 #include "../shared/utils.hpp"

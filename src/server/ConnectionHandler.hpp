@@ -7,7 +7,7 @@
 #include "ClientInfo.hpp"
 #include "ConnectionServer.hpp"
 #include "Settings.hpp"
-#include "../client/Connection.hpp"
+#include "../shared/Connection.hpp"
 
 template < typename T >
 concept ConnType = std::same_as<T, ConnectionServer> || std::same_as<T, Connection>;
@@ -36,7 +36,8 @@ private:
 
     [[nodiscard]] bool _auth ( const std::string& user, const std::string& pass ) const;
 
-    void _receiveFile ( ConnectionServer& connection ) const;
+    template < ConnType T >
+    void _receiveFile ( T& connection ) const;
 
     static void _sendFile ( ConnectionServer& connection );
 
@@ -44,12 +45,14 @@ private:
 
     void _listFiles ( ConnectionServer& connection ) const;
 
-    static void _sendFileInSync ( ConnectionServer& connection, const std::string& fileName );
+    template < ConnType T >
+    static void _sendFileInSync ( T& connection, const std::string& fileName );
 
     template < SetOrVectorOfString T >
     T _findCorrespondingFileNames ( const std::set<std::string>& toFind ) const;
 
     void _syncAsSlave ( ConnectionServer& connection ) const;
+    void _syncAsMaster ( Connection& connection, const Settings::SyncTarget& target ) const;
     void _syncer () const;
 
     template < SetOrVectorOfString T >

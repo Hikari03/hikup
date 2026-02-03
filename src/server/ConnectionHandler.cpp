@@ -11,10 +11,9 @@
 #include "../shared/utils.hpp"
 
 
-
 ConnectionHandler::ConnectionHandler ( Settings settings )
     : settings(std::move(settings)) {
-    if (!settings.syncTargets.empty())
+    if ( !settings.syncTargets.empty() )
         syncThread = std::jthread(&ConnectionHandler::_syncer, this);
 }
 
@@ -68,7 +67,8 @@ bool ConnectionHandler::_auth ( const std::string& user, const std::string& pass
     return true;
 }
 
-void ConnectionHandler::_receiveFile ( ConnectionServer& connection ) const {
+template < ConnType T >
+void ConnectionHandler::_receiveFile ( T& connection ) const {
     const auto fileSize = stoll(connection.receiveInternal().substr(strlen("size:")));
     auto fileName = connection.receiveInternal().substr(strlen("filename:"));
     const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
@@ -284,7 +284,8 @@ void ConnectionHandler::_listFiles ( ConnectionServer& connection ) const {
     connection.sendInternal("DONE");
 }
 
-void ConnectionHandler::_sendFileInSync ( ConnectionServer& connection, const std::string& fileName ) {
+template < ConnType T >
+void ConnectionHandler::_sendFileInSync ( T& connection, const std::string& fileName ) {
     const auto _path = std::filesystem::current_path() / "storage" / fileName;
 
     const auto fileSize = std::filesystem::file_size(_path);
@@ -300,7 +301,7 @@ void ConnectionHandler::_sendFileInSync ( ConnectionServer& connection, const st
     connection.sendInternal("filename:" + clientStyleFileName);
     connection.sendInternal("hash" + hash);
 
-    if (connection.receiveInternal() != "OK") {
+    if ( connection.receiveInternal() != "OK" ) {
         Utils::elog("For some reason remote already has the file, this shouldn't happen");
         connection.receiveInternal();
         return;
@@ -348,10 +349,8 @@ void ConnectionHandler::_sendFileInSync ( ConnectionServer& connection, const st
 
     connection.sendInternal("DONE");
 
-    if (auto message = connection.receiveInternal();
-        message != "OK") {
-        Utils::elog(connection.receiveInternal());
-    }
+    if ( auto message = connection.receiveInternal();
+        message != "OK" ) { Utils::elog(connection.receiveInternal()); }
 }
 
 // set substraction
@@ -371,7 +370,7 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) const {
     const std::string pass = connection.receiveInternal();
 
     if ( !_auth(user, pass) ) {
-        connection.sendInternal("NOPE");
+        connection.sendInternal("Invalid credentials");
         return;
     }
 
@@ -389,23 +388,79 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) const {
 
     // Again, master is first to send missing files
     for ( size_t i = 0; i < toGet.size(); i-- ) {
-        Utils::log("ConnectionHandler: getting file " + std::to_string(i) + "/" + std::to_string(toGet.size()-1));
+        Utils::log("ConnectionHandler: getting file " + std::to_string(i) + "/" + std::to_string(toGet.size() - 1));
         _receiveFile(connection);
     }
 
     const auto toSendFileNames = _findCorrespondingFileNames<std::set<std::string>>(toSend);
 
-    for ( auto counter = 0; const auto& fileName: toSendFileNames ) {
-        Utils::log("ConnectionHandler: sending file " + std::to_string(counter) + "/" + std::to_string(toSend.size()-1));
+    for ( auto counter = 0;
+          const auto& fileName: toSendFileNames ) {
+        Utils::log(
+            "ConnectionHandler: sending file " + std::to_string(counter) + "/" + std::to_string(toSend.size() - 1)
+        );
         _sendFileInSync(connection, fileName);
         ++counter;
     }
+
+    Utils::log("Incoming sync complete");
 }
+
+void ConnectionHandler::_syncAsMaster ( Connection& connection, const Settings::SyncTarget& target ) const {
+    // send command type and authenticate
+    connection.sendInternal("command:SYNC")
+              .sendInternal(target.targetUser)
+              .sendInternal(target.targetPass);
+
+    {
+        if ( const auto response = connection.receiveInternal();
+            response != "OK" ) {
+            throw std::runtime_error(response);
+        }
+    }
+
+    const auto localHashes = _getLocalFileHashes<std::set<std::string>>();
+    connection.sendData(_generateHashesString(localHashes));
+
+    const auto remoteHashes = _parseHashes<std::set<std::string>>(connection.receiveData());
+
+    const auto toGet = remoteHashes / localHashes;
+    const auto toSend = localHashes / remoteHashes;
+
+    const auto toSendFileNames = _findCorrespondingFileNames<std::set<std::string>>(toSend);
+
+    for ( auto counter = 0;
+        const auto& fileName: toSendFileNames ) {
+        Utils::log(
+            "ConnectionHandler: sending file " + std::to_string(counter) + "/" + std::to_string(toSend.size() - 1)
+        );
+        _sendFileInSync(connection, fileName);
+        ++counter;
+    }
+
+    for ( size_t i = 0; i < toGet.size(); i-- ) {
+        Utils::log("ConnectionHandler: getting file " + std::to_string(i) + "/" + std::to_string(toGet.size() - 1));
+        _receiveFile(connection);
+    }
+}
+
 
 void ConnectionHandler::_syncer () const {
 
     while ( !stopRequested ) {
+        std::this_thread::sleep_for(std::chrono::seconds(2)); //TODO CHANGE
 
+        const auto hashes = _getLocalFileHashes<std::set<std::string>>();
+
+        for ( const auto& target: settings.syncTargets ) {
+            try {
+                Connection conn;
+                conn.connectToServer(target.targetAddress, 6998);
+                _syncAsMaster(conn, target);
+            } catch ( const std::exception& e ) {
+                Utils::elog("Error occurred when trying sync to \"" + target.targetName + "\" on address " + target.targetAddress + ": " + e.what());
+            }
+        }
     }
 }
 
@@ -415,8 +470,8 @@ T ConnectionHandler::_findCorrespondingFileNames ( const std::set<std::string>& 
 
     T result;
 
-    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
-        if (toFind.contains(entry.path().extension().string().substr(1))) {
+    for ( const auto& entry: std::filesystem::directory_iterator(directory) ) {
+        if ( toFind.contains(entry.path().extension().string().substr(1)) ) {
             auto tmp = entry.path().filename().string();
         }
     }

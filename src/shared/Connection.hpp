@@ -51,11 +51,11 @@ public:
 
 	void connectToServer ( std::string ip, int port );
 
-	void send ( const std::string& message );
+	Connection& send ( const std::string& message );
 
-	void sendData ( const std::string& message );
+	Connection& sendData ( const std::string& message );
 
-	void sendInternal ( const std::string& message );
+	Connection& sendInternal ( const std::string& message );
 
 	std::string receive ();
 

@@ -49,6 +49,8 @@ Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
             result.syncTargets.emplace_back(
                 target->get("name")->as_string()->value_or("INVALID"),
                 target->get("address")->as_string()->value_or("INVALID"),
+                target->get("user")->as_string()->value_or("INVALID"),
+                target->get("pass")->as_string()->value_or("INVALID"),
                 target->get("isMaster")->as_boolean()->value_or(false)
             );
 

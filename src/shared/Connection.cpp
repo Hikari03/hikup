@@ -119,7 +119,7 @@ std::string Connection::_receive () {
 	return message;
 }
 
-void Connection::send ( const std::string& message ) {
+Connection& Connection::send ( const std::string& message ) {
 	auto messageToSend = message;
 
 #ifdef HIKUP_CONN_DEBUG
@@ -138,11 +138,13 @@ void Connection::send ( const std::string& message ) {
 	//std::cout << "\nSEND | " << messageToSend << std::endl;
 
 	_send(messageToSend.data(), messageToSend.size());
+
+	return *this;
 }
 
-void Connection::sendData ( const std::string& message ) { send(_data + message); }
+Connection& Connection::sendData ( const std::string& message ) { return send(_data + message); }
 
-void Connection::sendInternal ( const std::string& message ) { send(_internal + message); }
+Connection& Connection::sendInternal ( const std::string& message ) { return send(_internal + message); }
 
 std::string Connection::receive () {
 
