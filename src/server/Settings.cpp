@@ -9,6 +9,19 @@ std::string operator+ ( const std::string& lhs, const toml::source_position& rhs
     return rhs1.str();
 }
 
+Settings::Settings ( const Settings& other ) {
+
+    if (this == &other)
+        return;
+
+    authUser = other.authUser;
+    authPass = other.authPass;
+    httpAddress = other.httpAddress;
+    httpProtocol = other.httpProtocol;
+    hostname = other.hostname;
+    syncTargets = other.syncTargets;
+}
+
 Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
     toml::parse_result settings;
 

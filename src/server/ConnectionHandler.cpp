@@ -12,7 +12,9 @@
 
 
 ConnectionHandler::ConnectionHandler ( Settings settings )
-    : settings(std::move(settings)) {
+    : settings(settings) {
+
+    Utils::log("ConnectionHandler settings: " + settings.toString());
     if ( !settings.syncTargets.empty() )
         syncThread = std::jthread(&ConnectionHandler::_syncer, this);
 }
@@ -139,7 +141,8 @@ void ConnectionHandler::_receiveFile ( T& connection ) const {
     if ( hashFromClient != hashString ) {
         std::filesystem::remove(_path);
         connection.sendInternal("Sent hash and calculated hash do not match");
-        Utils::elog("Sent hash and calculated hash do not match");
+        Utils::elog("Sent hash and calculated hash do not match:\nremote: " + hashFromClient + "\nlocal: " + hashString);
+        return;
     }
 
     connection.sendInternal("OK");
@@ -409,8 +412,8 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) const {
 void ConnectionHandler::_syncAsMaster ( Connection& connection, const Settings::SyncTarget& target ) const {
     // send command type and authenticate
     connection.sendInternal("command:SYNC")
-              .sendInternal(target.targetUser)
-              .sendInternal(target.targetPass);
+              .sendInternal("user:" + target.targetUser)
+              .sendInternal("pass:" + target.targetPass);
 
     {
         if ( const auto response = connection.receiveInternal();
@@ -447,16 +450,20 @@ void ConnectionHandler::_syncAsMaster ( Connection& connection, const Settings::
 
 void ConnectionHandler::_syncer () const {
 
+    Utils::log("ConnectionHandler: syncing on");
+
     while ( !stopRequested ) {
         std::this_thread::sleep_for(std::chrono::seconds(2)); //TODO CHANGE
 
-        const auto hashes = _getLocalFileHashes<std::set<std::string>>();
+        Utils::log("targets size: " + std::to_string(settings.syncTargets.size()));
 
         for ( const auto& target: settings.syncTargets ) {
             try {
                 Connection conn;
                 conn.connectToServer(target.targetAddress, 6998);
+                Utils::log("entering sync");
                 _syncAsMaster(conn, target);
+                Utils::log("completed sync");
             } catch ( const std::exception& e ) {
                 Utils::elog("Error occurred when trying sync to \"" + target.targetName + "\" on address " + target.targetAddress + ": " + e.what());
             }
@@ -472,7 +479,7 @@ T ConnectionHandler::_findCorrespondingFileNames ( const std::set<std::string>& 
 
     for ( const auto& entry: std::filesystem::directory_iterator(directory) ) {
         if ( toFind.contains(entry.path().extension().string().substr(1)) ) {
-            auto tmp = entry.path().filename().string();
+            result.emplace(entry.path().filename().string());
         }
     }
 

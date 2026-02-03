@@ -28,7 +28,7 @@ public:
 private:
     bool stopRequested = false;
     std::vector<std::jthread> clientThreads;
-    Settings settings;
+    const Settings settings;
     std::jthread syncThread;
 
 

@@ -5,6 +5,11 @@
 #include <vector>
 
 struct Settings {
+
+    Settings () = default;
+
+    Settings ( const Settings& other );
+
     struct SyncTarget;
 
     std::string authUser;
