@@ -30,9 +30,10 @@ private:
     std::vector<std::jthread> clientThreads;
     const Settings settings;
     std::jthread syncThread;
+    std::mutex syncMutex;
 
 
-    void _serveConnection ( ClientInfo client ) const;
+    void _serveConnection ( ClientInfo client );
 
     [[nodiscard]] bool _auth ( const std::string& user, const std::string& pass ) const;
 
@@ -41,7 +42,9 @@ private:
 
     static void _sendFile ( ConnectionServer& connection );
 
-    static void _removeFile ( ConnectionServer& connection );
+    void _removeOnSynced ( const std::string& hash ) const;
+
+    void _removeFile ( ConnectionServer& connection );
 
     void _listFiles ( ConnectionServer& connection ) const;
 
@@ -53,7 +56,7 @@ private:
 
     void _syncAsSlave ( ConnectionServer& connection ) const;
     void _syncAsMaster ( Connection& connection, const Settings::SyncTarget& target ) const;
-    void _syncer () const;
+    void _syncer ();
 
     template < SetOrVectorOfString T >
     static T _parseHashes ( const std::string& hashesString );

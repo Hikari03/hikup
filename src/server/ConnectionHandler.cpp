@@ -9,12 +9,11 @@
 #include "utils.hpp"
 #include "../shared/FileInfo.hpp"
 #include "../shared/utils.hpp"
+#include "includes/toml.hpp"
 
 
 ConnectionHandler::ConnectionHandler ( Settings settings )
     : settings(settings) {
-
-    Utils::log("ConnectionHandler settings: " + settings.toString());
     if ( !settings.syncTargets.empty() )
         syncThread = std::jthread(&ConnectionHandler::_syncer, this);
 }
@@ -24,7 +23,7 @@ void ConnectionHandler::addClient ( ClientInfo client ) {
 }
 
 
-void ConnectionHandler::_serveConnection ( ClientInfo client ) const {
+void ConnectionHandler::_serveConnection ( ClientInfo client ) {
     Utils::log("ConnectionHandler: serving client " + client.getIp());
 
     ConnectionServer connection(client);
@@ -141,7 +140,9 @@ void ConnectionHandler::_receiveFile ( T& connection ) const {
     if ( hashFromClient != hashString ) {
         std::filesystem::remove(_path);
         connection.sendInternal("Sent hash and calculated hash do not match");
-        Utils::elog("Sent hash and calculated hash do not match:\nremote: " + hashFromClient + "\nlocal: " + hashString);
+        Utils::elog(
+            "Sent hash and calculated hash do not match:\nremote: " + hashFromClient + "\nlocal: " + hashString
+        );
         return;
     }
 
@@ -237,6 +238,27 @@ void ConnectionHandler::_sendFile ( ConnectionServer& connection ) {
     connection.sendInternal("DONE");
 }
 
+void ConnectionHandler::_removeOnSynced ( const std::string& hash ) const {
+    if ( Utils::addIntoArrInToml({"storage/toRemove.toml"}, hash) )
+        Utils::elog("Could not add hash for later deletion");
+
+    for ( const auto& target: settings.syncTargets ) {
+        Connection connection;
+
+        try { connection.connectToServer(target.targetAddress, 6998); }
+        catch ( ... ) {
+            Utils::log("Tried removing file on \"" + target.targetName + "\" but it is unavailable");
+        }
+
+        Utils::log("Trying to remove file on \"" + target.targetName + "\": " + hash);
+
+        connection.sendInternal("command:REMOVE")
+                  .sendInternal("hash: " + hash);
+
+        connection.receiveInternal();
+    }
+}
+
 void ConnectionHandler::_removeFile ( ConnectionServer& connection ) {
     const auto hash = connection.receiveInternal().substr(strlen("hash:"));
 
@@ -247,7 +269,7 @@ void ConnectionHandler::_removeFile ( ConnectionServer& connection ) {
             fileName = file.path();
 
     if ( fileName.empty() ) {
-        Utils::log("removeFile: file not found: " + fileName.string());
+        Utils::log("removeFile: file not found for hash: " + hash);
         connection.sendInternal("NO");
         return;
     }
@@ -259,11 +281,12 @@ void ConnectionHandler::_removeFile ( ConnectionServer& connection ) {
     Utils::log(
         "removeFile: removing files: " + ( std::filesystem::current_path() / "links" / symlinkName ).string() + ", " +
         fileName.string()
-    );
-
-    std::filesystem::remove(std::filesystem::current_path() / "links" / symlinkName);
-    std::filesystem::remove(fileName);
-
+    ); {
+        std::lock_guard lock(syncMutex);
+        std::filesystem::remove(std::filesystem::current_path() / "links" / symlinkName);
+        std::filesystem::remove(fileName);
+        _removeOnSynced(hash);
+    }
     connection.sendInternal("OK");
 }
 
@@ -298,11 +321,11 @@ void ConnectionHandler::_sendFileInSync ( T& connection, const std::string& file
     auto clientStyleFileName = fileName.substr(lastOfSlash + 1, lastOfDot - lastOfSlash - 1);
     std::ranges::replace(clientStyleFileName, '<', '.');
 
-    const auto hash = _path.extension().string().substr(0, lastOfDot + 1);
+    const auto hash = _path.extension().string().substr(1);
 
     connection.sendInternal("size:" + std::to_string(fileSize));
     connection.sendInternal("filename:" + clientStyleFileName);
-    connection.sendInternal("hash" + hash);
+    connection.sendInternal("hash:" + hash);
 
     if ( connection.receiveInternal() != "OK" ) {
         Utils::elog("For some reason remote already has the file, this shouldn't happen");
@@ -413,13 +436,9 @@ void ConnectionHandler::_syncAsMaster ( Connection& connection, const Settings::
     // send command type and authenticate
     connection.sendInternal("command:SYNC")
               .sendInternal("user:" + target.targetUser)
-              .sendInternal("pass:" + target.targetPass);
-
-    {
+              .sendInternal("pass:" + target.targetPass); {
         if ( const auto response = connection.receiveInternal();
-            response != "OK" ) {
-            throw std::runtime_error(response);
-        }
+            response != "OK" ) { throw std::runtime_error(response); }
     }
 
     const auto localHashes = _getLocalFileHashes<std::set<std::string>>();
@@ -433,7 +452,7 @@ void ConnectionHandler::_syncAsMaster ( Connection& connection, const Settings::
     const auto toSendFileNames = _findCorrespondingFileNames<std::set<std::string>>(toSend);
 
     for ( auto counter = 0;
-        const auto& fileName: toSendFileNames ) {
+          const auto& fileName: toSendFileNames ) {
         Utils::log(
             "ConnectionHandler: sending file " + std::to_string(counter) + "/" + std::to_string(toSend.size() - 1)
         );
@@ -448,24 +467,24 @@ void ConnectionHandler::_syncAsMaster ( Connection& connection, const Settings::
 }
 
 
-void ConnectionHandler::_syncer () const {
-
+void ConnectionHandler::_syncer () {
     Utils::log("ConnectionHandler: syncing on");
 
     while ( !stopRequested ) {
-        std::this_thread::sleep_for(std::chrono::seconds(2)); //TODO CHANGE
-
-        Utils::log("targets size: " + std::to_string(settings.syncTargets.size()));
+        std::this_thread::sleep_for(std::chrono::seconds(10)); //TODO CHANGE
+        std::lock_guard lock(syncMutex);
 
         for ( const auto& target: settings.syncTargets ) {
             try {
                 Connection conn;
                 conn.connectToServer(target.targetAddress, 6998);
-                Utils::log("entering sync");
                 _syncAsMaster(conn, target);
-                Utils::log("completed sync");
-            } catch ( const std::exception& e ) {
-                Utils::elog("Error occurred when trying sync to \"" + target.targetName + "\" on address " + target.targetAddress + ": " + e.what());
+            }
+            catch ( const std::exception& e ) {
+                Utils::elog(
+                    "Error occurred when trying sync to \"" + target.targetName + "\" on address " + target.
+                    targetAddress + ": " + e.what()
+                );
             }
         }
     }
@@ -495,11 +514,15 @@ T ConnectionHandler::_parseHashes ( const std::string& hashesString ) {
 
     while ( offset < hashesString.length() ) {
         const auto separator = hashesString.find_first_of('|', offset);
-        if ( separator == std::string::npos ) { throw std::runtime_error("Parsing hashes: invalid separator"); }
+
+        if ( separator == std::string::npos )
+            throw std::runtime_error("Parsing hashes: invalid separator");
 
         hashes.emplace(hashesString.substr(offset, separator - offset));
         offset = separator + 1;
     }
+
+
     return hashes;
 }
 
