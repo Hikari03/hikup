@@ -256,9 +256,11 @@ void ConnectionHandler::_removeOnSynced ( const std::string& hash ) const {
         Utils::log("Trying to remove file on \"" + target.targetName + "\": " + hash);
 
         connection.sendInternal("command:REMOVE")
-                  .sendInternal("hash: " + hash);
+                  .sendInternal("hash:" + hash);
 
-        connection.receiveInternal();
+        if ( connection.receiveInternal() == "OK" )
+            Utils::log("Deletion successful");
+        else Utils::log("Deletion failed");
     }
 }
 
