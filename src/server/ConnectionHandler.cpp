@@ -151,8 +151,9 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
         connection.sendInternal("Sent hash and calculated hash do not match");
         return;
     }
-    
-    std::filesystem::rename(downloadPath, _path);
+
+    std::filesystem::copy(downloadPath, _path);
+    std::filesystem::remove(downloadPath);
 
     connection.sendInternal("OK");
 
