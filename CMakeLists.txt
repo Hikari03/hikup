@@ -15,8 +15,8 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBSODIUM REQUIRED libsodium)
 
 add_executable(hikup src/client/main.cpp
-        src/client/Connection.hpp
-        src/client/Connection.cpp
+        src/shared/Connection.hpp
+        src/shared/Connection.cpp
         src/client/util.cpp
         src/client/CommandType.cpp
         src/client/Color.cpp
@@ -33,7 +33,8 @@ add_executable(hikup-server src/server/main.cpp
         src/server/ClientInfo.hpp
         src/server/ConnectionServer.cpp
         src/server/ConnectionServer.hpp
-        src/server/utilServer.cpp
+        src/shared/Connection.hpp
+        src/shared/Connection.cpp
         src/server/HTTPFileServer.cpp
         src/server/HTTPFileServer.hpp
         src/server/includes/mongoose.cpp
@@ -43,7 +44,15 @@ add_executable(hikup-server src/server/main.cpp
         src/shared/FileInfo.hpp
         src/shared/utils.cpp
         src/shared/utils.cpp
-        src/shared/utils.hpp)
+        src/shared/utils.hpp
+        src/server/ConnectionHandler.cpp
+        src/server/ConnectionHandler.hpp
+        src/server/Settings.hpp
+        src/server/Settings.cpp
+        src/server/utils.cpp
+        src/server/utils.hpp
+        src/server/RemovalTracker.cpp
+        src/server/RemovalTracker.hpp)
 
 target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hikup ${LIBSODIUM_LIBRARIES})

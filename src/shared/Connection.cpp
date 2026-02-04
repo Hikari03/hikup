@@ -24,7 +24,7 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 	memset(_buffer.get(), '\0', _bufferSize);
 }
 
-void Connection::connectToServer ( std::string ip, const int port ) {
+void Connection::connectToServer ( std::string ip, const int port, const time_t timeout ) {
 	if ( ip == "localhost" || ip.empty() )
 		ip = "127.0.0.1";
 
@@ -45,11 +45,11 @@ void Connection::connectToServer ( std::string ip, const int port ) {
 		}
 	}
 
-	timeval timeout{};
-	timeout.tv_sec = 5; // Timeout in seconds
-	timeout.tv_usec = 0; // Timeout in microseconds
+	timeval _timeout{};
+	_timeout.tv_sec = timeout; // Timeout in seconds
+	_timeout.tv_usec = 0; // Timeout in microseconds
 
-	if ( setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
+	if ( setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &_timeout, sizeof( _timeout )) < 0 ) {
 		throw std::runtime_error("setsockopt failed");
 	}
 
@@ -119,7 +119,7 @@ std::string Connection::_receive () {
 	return message;
 }
 
-void Connection::send ( const std::string& message ) {
+Connection& Connection::send ( const std::string& message ) {
 	auto messageToSend = message;
 
 #ifdef HIKUP_CONN_DEBUG
@@ -138,11 +138,13 @@ void Connection::send ( const std::string& message ) {
 	//std::cout << "\nSEND | " << messageToSend << std::endl;
 
 	_send(messageToSend.data(), messageToSend.size());
+
+	return *this;
 }
 
-void Connection::sendData ( const std::string& message ) { send(_data + message); }
+Connection& Connection::sendData ( const std::string& message ) { return send(_data + message); }
 
-void Connection::sendInternal ( const std::string& message ) { send(_internal + message); }
+Connection& Connection::sendInternal ( const std::string& message ) { return send(_internal + message); }
 
 std::string Connection::receive () {
 

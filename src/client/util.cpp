@@ -64,20 +64,19 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 	while ( true ) {
 		file.read(buffer.get(), allocationSpace);
 
-		if ( file.gcount() == 0 ) {
-			if ( file.fail() )
-				throw std::runtime_error("Error reading file.");
+		if ( file.gcount() == 0 )
 			break;
-		}
 
-		else {
-			// Update hash with the bytes read
-			crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(buffer.get()),
-			                          file.gcount());
-		}
+
+		// Update hash with the bytes read
+		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(buffer.get()),
+		                          file.gcount());
+
 
 		if ( file.eof() )
 			break;
+		if ( file.fail() )
+			throw std::runtime_error("Error reading file.");
 
 		std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) +
 				colorize(humanReadableSize(static_cast<size_t>(file.tellg())) + '/'+ humanReadableSize(fileSize) + "         ", Color::CYAN) << std::flush;

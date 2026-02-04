@@ -1,7 +1,7 @@
 #include <iostream>
 
 #include "CommandType.cpp"
-#include "Connection.hpp"
+#include "../shared/Connection.hpp"
 #include "util.cpp"
 #include "../shared/FileInfo.hpp"
 #include "../shared/utils.hpp"
@@ -79,7 +79,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
                 + colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
 #endif
 
-        // this has to be here - if we change the size and break the loop after, wrong amount of data will be sent and probably partly random
+
         if ( sizeRead == static_cast<unsigned long long>(fileSize) ) {
 #ifdef HIKUP_DEBUG
             std::cout << "DEBUG | Final chunk sent, breaking loop. | \nchunkSize: " << chunkSize << "\nsizeRead: " << sizeRead <<
@@ -126,6 +126,14 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 #endif
 
     connection.sendInternal("DONE");
+    std::cout << "sent done" << std::endl;
+    if ( const auto confirmation = connection.receiveInternal();
+        confirmation != "OK") {
+        std::cout << colorize("Upload failed with response: " + confirmation, Color::RED);
+        return;
+    }
+
+
     const auto hash = connection.receiveInternal();
     const bool httpExists = std::stoi(connection.receiveInternal());
 
@@ -268,7 +276,7 @@ void printHelp ( const std::string& argv0 ) {
                 "which you need to input if you want to download it.\n\n"
                 "For ls command, provide username and password (from server settings).\n\n"
                 "If server has HTTP server, you will get link for download.\n"
-                "You can append '?inplace=yes' to the link to view the file in browser." << std::endl;
+                "You can append '?view=yes' to the link to view the file in browser." << std::endl;
 }
 
 int start ( int argc, char* argv[] ) {

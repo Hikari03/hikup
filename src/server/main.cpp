@@ -1,299 +1,49 @@
 #include <algorithm>
 #include <condition_variable>
 #include <csignal>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <list>
 #include <thread>
 #include <vector>
 #include <netinet/in.h>
 #include <sys/socket.h>
 
 #include "accepter.cpp"
-#include "ConnectionServer.hpp"
+#include "ConnectionHandler.hpp"
 #include "HTTPFileServer.hpp"
+#include "Settings.hpp"
 #include "terminal.cpp"
-#include "utilServer.cpp"
-#include "../shared/FileInfo.hpp"
-#include "../shared/utils.hpp"
-#include "includes/toml.hpp"
+#include "utils.hpp"
 
 sig_atomic_t stopRequested = 0;
 std::condition_variable callBack;
-int clientSocket = -1;
 
 // used for graceful shutdown in docker
 void signalHandler ( const int signal ) {
-	std::cout << "Interrupt signal (" << signal << ") received." << std::endl;
+	Utils::log("Interrupt signal (" + std::to_string(signal) + ") received.");
 	if ( signal == SIGINT || signal == SIGTERM )
 		stopRequested = 1;
-
-	shutdown(clientSocket, SHUT_RDWR);
-	close(clientSocket);
 
 	callBack.notify_one();
 }
 
-void receiveFile ( ConnectionServer& connection, const Settings& settings ) {
-	const auto fileSize = stoll(connection.receiveInternal().substr(strlen("size:")));
-	auto fileName = connection.receiveInternal().substr(strlen("filename:"));
-	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
-
-	const auto oldFileName = fileName;
-
-	auto freeRam = std::min(getFreeMemory() / 4, static_cast<unsigned long>(fileSize / 16));
-
-	connection.resizeBuffer(freeRam);
-
-	// convert all '.' to '$' in the filename
-	std::ranges::replace(fileName, '.', '<');
-
-	std::filesystem::path _path = std::filesystem::current_path() / "storage" / ( fileName + '.' + hashFromClient );
-
-	std::cout << _path << std::endl;
-
-	if ( std::filesystem::exists(_path) ) {
-		std::cout << "receiveFile: file already exists" << std::endl;
-		connection.sendInternal("NO");
-		connection.sendInternal(settings.httpProtocol + "://" + settings.hostname + "/" + oldFileName);
-		return;
-	}
-
-	connection.sendInternal("OK");
-
-	std::ofstream file(_path, std::ios::binary);
-
-	std::cout << "receiveFile: starting download of size: " << fileSize << std::endl;
-
-	std::string message;
-	long long sizeWritten = 0;
-
-	unsigned char hash[crypto_generichash_BYTES];
-	crypto_generichash_state state;
-	crypto_generichash_init(&state, nullptr, 0, sizeof hash);
-
-	while ( true ) {
-		try { message = connection.receive(); }
-		catch ( const std::exception& e ) {
-			std::cerr << "receiveFile: error receiving message: " << e.what() << std::endl;
-			file.close();
-			std::filesystem::remove(_path);
-			connection.sendInternal("fail");
-			return;
-		}
-
-		if ( message.starts_with(_internal"DONE") )
-			break;
-
-		file.write(message.data(), message.size());
-		sizeWritten += message.size();
-
-		connection.sendInternal("confirm");
-
-		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.data()), message.size());
-
-		std::cout << '\r' << "main: " << humanReadableSize(sizeWritten) << " / " << humanReadableSize(fileSize) <<
-				" bytes written" << std::flush;
-	}
-	std::cout << std::endl;
-	file.close();
-
-	crypto_generichash_final(&state, hash, sizeof hash);
-
-	auto hashString = binToHex(hash, sizeof hash);
-
-	std::filesystem::create_symlink(_path, std::filesystem::current_path()/ "links" / oldFileName);
-
-	connection.sendInternal(hashString);
-	connection.sendInternal(std::to_string(settings.wantHttp));
-	if ( settings.wantHttp )
-		connection.sendInternal(settings.httpProtocol + "://" + settings.hostname + "/" + oldFileName);
-}
-
-void sendFile ( ConnectionServer& connectionServer ) {
-	auto hash = connectionServer.receiveInternal().substr(strlen("hash:"));
-	std::string fileName;
-
-	for ( const auto& file: std::filesystem::directory_iterator("storage") )
-		if ( file.path().extension() == '.' + hash )
-			fileName = file.path();
-
-	if ( fileName.empty() ) {
-		std::cout << "sendFile: file not found" << std::endl;
-		connectionServer.sendInternal("NO");
-		return;
-	}
-
-	std::ifstream file(fileName, std::ios::binary);
-
-	if ( !file.good() ) {
-		std::cout << "sendFile: could not open file" << std::endl;
-		connectionServer.sendInternal("NO");
-		return;
-	}
-
-	const auto freeRam = getFreeMemory() / 4;
-
-	connectionServer.sendInternal("OK");
-
-	const auto fileSize = std::filesystem::file_size(fileName);
-
-	size_t chunkSize = 4 * 1024 * 1024;
-	auto buffer = std::make_unique<char[]>(chunkSize);
-
-	connectionServer.sendInternal(std::to_string(fileSize));
-
-	auto lastOfSlash = fileName.find_last_of('/');
-	auto lastOfDot = fileName.find_last_of('.');
-
-	auto clientFileName = fileName.substr(lastOfSlash+1, lastOfDot - lastOfSlash-1 );
-	std::ranges::replace(clientFileName, '<', '.');
-
-	connectionServer.sendInternal(clientFileName);
-
-	std::cout << "sendFile: starting upload of size: " << humanReadableSize(fileSize) << std::endl;
-
-	size_t sizeRead = 0;
-
-	while ( true ) {
-		file.read(buffer.get(), chunkSize);
-
-		const auto startUploadTime = std::chrono::high_resolution_clock::now();
-		connectionServer.send(std::string(buffer.get(), file.gcount()));
-		const auto endUploadTime = std::chrono::high_resolution_clock::now();
-
-		std::chrono::duration<double> duration = endUploadTime - startUploadTime;
-
-		sizeRead += file.gcount();
-
-		if ( connectionServer.receiveInternal() != "confirm" )
-			throw std::runtime_error("sendFile: client did not confirm the chunk");
-
-		if ( sizeRead == static_cast<unsigned long long>(fileSize) )
-			break;
-
-		// adjust chunk size based on duration
-		if (duration.count() > 1.4) {
-			// decrease chunkSize by 2%, ensure integer rounding
-			chunkSize = static_cast<int>(chunkSize * 0.75);
-
-			buffer = std::make_unique<char[]>(chunkSize);
-		}
-		else if ( duration.count() < 0.3 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<int>(chunkSize * 2);
-			buffer = std::make_unique<char[]>(chunkSize);
-
-		}
-		else if ( duration.count() < 0.6 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<int>(chunkSize * 1.25);
-			buffer = std::make_unique<char[]>(chunkSize);
-		}
-	}
-
-	connectionServer.sendInternal("DONE");
-}
-
-void removeFile ( ConnectionServer& connectionServer ) {
-	const auto hash = connectionServer.receiveInternal().substr(strlen("hash:"));
-
-	std::filesystem::path fileName;
-
-	for ( const auto& file: std::filesystem::directory_iterator("storage") )
-		if ( file.path().extension() == '.' + hash )
-			fileName = file.path();
-
-	if ( fileName.empty() ) {
-		std::cout << "removeFile: file not found: " << fileName << std::endl;
-		connectionServer.sendInternal("NO");
-		return;
-	}
-
-	auto symlinkName = fileName.filename().string().substr(0,fileName.filename().string().find('.'));
-	std::ranges::replace(symlinkName, '<', '.');
-
-
-	std::cout << "removeFile: removing files: " << (std::filesystem::current_path() / "links" / symlinkName) << ", " << fileName << std::endl;
-
-	std::filesystem::remove(std::filesystem::current_path() / "links" / symlinkName);
-	std::filesystem::remove(fileName);
-
-	connectionServer.sendInternal("OK");
-}
-
-void listFiles ( ConnectionServer& connection, const Settings& settings ) {
-
-	connection.sendInternal("OK");
-
-	std::string user = connection.receiveInternal();
-
-	if ( !user.starts_with("user:") )
-		throw std::runtime_error("listFiles: no user specified, got: " + user);
-
-	user = user.substr(strlen("user:") );
-
-	std::string pass = connection.receiveInternal();
-
-	if ( !pass.starts_with("pass:") )
-		throw std::runtime_error("listFiles: no pass specified, got: " + pass);
-
-	pass = pass.substr(strlen("user:"));
-
-	if ( user != settings.authUser || pass != settings.authPass ) {
-		std::cout << "Wrong Credentials: " << user << ", " << pass << std::endl;
-		connection.sendInternal("NOPE");
-		return;
-	}
-
-	connection.sendInternal("OK");
-
-	for ( const auto& file : std::filesystem::directory_iterator("storage") ) {
-		connection.sendData(FileInfo(file, true).encode());
-	}
-
-	connection.sendInternal("DONE");
-
-}
-
-void serveConnection ( ClientInfo client, const Settings& settings ) {
-	std::cout << "main: serving client " << client.getIp() << std::endl;
-
-	ConnectionServer connection(client);
-	try {
-		connection.init();
-
-		const auto message = connection.receiveInternal();
-
-		std::cout << "main: received message: " << message << std::endl;
-		if ( message == "command:UPLOAD" )
-			receiveFile(connection, settings);
-		else if ( message == "command:DOWNLOAD" )
-			sendFile(connection);
-		else if ( message == "command:REMOVE" )
-			removeFile(connection);
-		else if ( message == "command:LIST")
-			listFiles(connection, settings);
-	} catch ( const std::exception& e ) {
-		std::cerr << "main: error serving client: " << e.what() << std::endl;
-	}
-}
 
 int main () {
 	std::signal(SIGINT, signalHandler);
 	std::signal(SIGTERM, signalHandler);
 	std::signal(SIGPIPE, SIG_IGN);
 
-	std::cout << "main: starting server" << std::endl;
+	Utils::log("main: starting server");
 
 	std::filesystem::create_directory("storage");
 	std::filesystem::create_directory("links");
 
-	const Settings settings = loadSettings();
+	const Settings settings = Settings::loadFromFile("settings/settings.toml");
 
-	std::cout << "main: settings file read successfully" << std::endl;
+	Utils::log("main: settings file read successfully");
 
-	std::cout << settings << std::endl;
+	Utils::log(settings.toString());
 
 	const int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -335,12 +85,12 @@ int main () {
 
 		httpThread = httpFileServer.run(settings.authUser, settings.authPass, settings.httpAddress);
 
-		std::cout << "main: http server started" << std::endl;
+		Utils::log("main: http server started");
 	}
 
+	ConnectionHandler connectionHandler(settings);
 
-
-	std::cout << "main: entering main loop, server started" << std::endl;
+	Utils::log("main: entering main loop, server started");
 
 	while ( true ) {
 		std::unique_lock lock(mutex);
@@ -350,9 +100,7 @@ int main () {
 			if ( !newClientAccepted )
 				continue;
 
-			clientSocket = acceptedClient.getSocket();
-
-			serveConnection(std::move(acceptedClient), settings);
+			connectionHandler.addClient(acceptedClient);
 			newClientAccepted = false;
 		}
 
@@ -362,33 +110,30 @@ int main () {
 		if ( turnOff ) {
 			// cleanup
 			lock.unlock();
-			std::cout << "main: cleaning up threads" << std::endl;
+			Utils::log("main: cleaning up threads");
 			if ( stopRequested ) {
-				std::cout << "main: stop requested" << std::endl;
+				Utils::log("main: stop requested");
 				pthread_cancel(terminalThread.native_handle());
 			}
 			else
 				terminalThread.join();
 
-			std::cout << "main: terminating client" << std::endl;
-			if ( clientSocket != -1 ) {
-				shutdown(clientSocket, SHUT_RDWR);
-				close(clientSocket);
-			}
+			Utils::log("main: terminating clients, will wait on open transactions");
+			connectionHandler.requestStop();
 
-			std::cout << "main: terminal closed" << std::endl;
+			Utils::log("main: terminal closed");
 			shutdown(serverSocket, SHUT_RDWR);
 			close(serverSocket);
 			accepterThread.join();
-			std::cout << "main: accepter closed" << std::endl;
+			Utils::log("main: accepter closed");
 			if ( settings.wantHttp )
 				httpThread.join();
-			std::cout << "main: http closed" << std::endl;
+			Utils::log("main: http closed");
 			break;
 		}
 	}
 
-	std::cout << "main: closing server" << std::endl;
+	Utils::log("main: closing server");
 
 	return 0;
 }

@@ -14,16 +14,16 @@ ConnectionServer::ConnectionServer ( ClientInfo clientInfo, const unsigned long 
 
 ConnectionServer::~ConnectionServer () {
 	_active = false;
-	shutdown(_clientInfo.socket_, SHUT_RDWR);
-	close(_clientInfo.socket_);
+	shutdown(_clientInfo.getSocket(), SHUT_RDWR);
+	close(_clientInfo.getSocket());
 }
 
 void ConnectionServer::init () {
 	timeval timeout{};
-	timeout.tv_sec = 5; // Timeout in seconds
+	timeout.tv_sec = 20; // Timeout in seconds
 	timeout.tv_usec = 0; // Timeout in microseconds
 
-	if ( setsockopt(_clientInfo.socket_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
+	if ( setsockopt(_clientInfo.getSocket(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
 		throw std::runtime_error("setsockopt failed");
 	}
 
@@ -33,7 +33,7 @@ void ConnectionServer::init () {
 }
 
 void ConnectionServer::initEncryption () {
-	std::cout << "initializing encryption with client " << _clientInfo.socket_ << std::endl;
+	std::cout << "initializing encryption with client " << _clientInfo.getSocket() << std::endl;
 	if ( sodium_init() < 0 )
 		throw std::runtime_error("Could not initialize sodium");
 
@@ -83,11 +83,11 @@ std::string ConnectionServer::receive () {
 	}
 
 	while ( !_message.ends_with(_end) ) {
-		//std::cout << "RECEIVE BUFFER BEFORE CLEAR|  " << _clientInfo.socket_ << ": " << _buffer << std::endl;
+		//std::cout << "RECEIVE BUFFER BEFORE CLEAR|  " << _clientInfo.getSocket() << ": " << _buffer << std::endl;
 		clearBuffer();
 
 		// receive message with timeout
-		_sizeOfPreviousMessage = recv(_clientInfo.socket_, _buffer.get(), _bufferSize, 0);
+		_sizeOfPreviousMessage = recv(_clientInfo.getSocket(), _buffer.get(), _bufferSize, 0);
 
 
 		if ( _sizeOfPreviousMessage < 0 ) {
@@ -104,10 +104,10 @@ std::string ConnectionServer::receive () {
 
 		_message += std::string(_buffer.get(), _sizeOfPreviousMessage);
 
-		//std::cout << "RECEIVE |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << _message << std::endl;
+		//std::cout << "RECEIVE |  " << _clientInfo.getSocket() << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << _message << std::endl;
 	}
 
-	//std::cout << "RECEIVE |  " << _clientInfo.socket_ << ": " << _message << std::endl;
+	//std::cout << "RECEIVE |  " << _clientInfo.getSocket() << ": " << _message << std::endl;
 
 	// cut off the _end
 
@@ -140,7 +140,7 @@ std::string ConnectionServer::receive () {
 	else
 		_moreInBuffer = true;
 
-	//std::cout << "RECEIVE2 |  " << _clientInfo.socket_ << ": " << _message << std::endl;
+	//std::cout << "RECEIVE2 |  " << _clientInfo.getSocket() << ": " << _message << std::endl;
 
 	return _message;
 }
@@ -168,19 +168,21 @@ void ConnectionServer::resizeBuffer ( const unsigned long newSize )  {
 	_bufferSize = newSize;
 }
 
+bool ConnectionServer::isActive () const { return _active; }
+
 void ConnectionServer::send ( const std::string& message ) const {
 	auto messageToSend = message;
 
-	//std::cout << "SEND1 |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
+	//std::cout << "SEND1 |  " << _clientInfo.getSocket() << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
 
 	if ( _encrypted ) { secretSeal(messageToSend); }
 	messageToSend += _end;
 
-	//std::cout << "SEND2 |  " << _clientInfo.socket_ << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
+	//std::cout << "SEND2 |  " << _clientInfo.getSocket() << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
 	if ( !_active )
 		return;
 	try {
-		if ( ::send(_clientInfo.socket_, messageToSend.data(), messageToSend.length(), 0) < 0 ) {
+		if ( ::send(_clientInfo.getSocket(), messageToSend.data(), messageToSend.length(), 0) < 0 ) {
 			throw std::runtime_error("Could not send message to client");
 		}
 	}
