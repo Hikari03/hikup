@@ -79,7 +79,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
                 + colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
 #endif
 
-        // this has to be here - if we change the size and break the loop after, wrong amount of data will be sent and probably partly random
+
         if ( sizeRead == static_cast<unsigned long long>(fileSize) ) {
 #ifdef HIKUP_DEBUG
             std::cout << "DEBUG | Final chunk sent, breaking loop. | \nchunkSize: " << chunkSize << "\nsizeRead: " << sizeRead <<
@@ -126,6 +126,7 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 #endif
 
     connection.sendInternal("DONE");
+    std::cout << "sent done" << std::endl;
     if ( const auto confirmation = connection.receiveInternal();
         confirmation != "OK") {
         std::cout << colorize("Upload failed with response: " + confirmation, Color::RED);

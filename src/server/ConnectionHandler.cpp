@@ -14,7 +14,7 @@
 
 ConnectionHandler::ConnectionHandler ( Settings settings )
     : removeFile("settings/toRemove.toml")
-    , settings(settings) {
+  , settings(settings) {
     if ( !settings.syncTargets.empty() )
         syncThread = std::jthread(&ConnectionHandler::_syncer, this);
 }
@@ -145,7 +145,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
         Utils::elog(
             "Sent hash and calculated hash do not match:\n remote: " + hashFromClient + "\n local: " + hashString
         );
-        if ( !removeFile.add(hashFromClient))
+        if ( !removeFile.add(hashFromClient) )
             Utils::elog("Could not add back hash");
         connection.sendInternal("Sent hash and calculated hash do not match");
         return;
@@ -244,14 +244,13 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 }
 
 void ConnectionHandler::_removeOnSyncedTargets ( const std::string& hash ) {
-
     if ( removeFile.add(hash) )
         Utils::elog("removeOnSyncedTargets: Could not record hash into file");
 
     for ( const auto& target: settings.syncTargets ) {
         Connection connection;
 
-        try { connection.connectToServer(target.targetAddress, 6998); }
+        try { connection.connectToServer(target.targetAddress, 6998, 5); }
         catch ( ... ) {
             Utils::log("removeOnSyncedTargets: Could not connect to remote");
             continue;
@@ -264,9 +263,7 @@ void ConnectionHandler::_removeOnSyncedTargets ( const std::string& hash ) {
 
         if ( connection.receiveInternal() == "OK" )
             Utils::log("removeOnSyncedTargets: Deletion successful");
-        else {
-            Utils::log("removeOnSyncedTargets: Deletion failed");
-        }
+        else { Utils::log("removeOnSyncedTargets: Deletion failed"); }
     }
 }
 
@@ -284,14 +281,11 @@ void ConnectionHandler::_handleRemoveFile ( ConnectionServer& connection ) {
         connection.sendInternal("NO");
         return;
     }
-
-
-    {
-        std::lock_guard lock(syncMutex);
-        _removeFile(fileName);
-        _removeOnSyncedTargets(hash);
-    }
     connection.sendInternal("OK");
+    _removeFile(fileName);
+
+    std::lock_guard lock(syncMutex);
+    _removeOnSyncedTargets(hash);
 }
 
 void ConnectionHandler::_handleListFiles ( ConnectionServer& connection ) const {
@@ -414,10 +408,11 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
         connection.sendData(_generateHashesString(localHashes));
 
         Utils::log("ConnectionHandler::_syncAsSlave: removing " + std::to_string(toRemove.size()) + " files");
-        for (const auto& fileName: toRemove) {
-            Utils::log("ConnectionHandler: removing file " + fileName);
-            _removeFile(std::filesystem::path("storage") / fileName);
-        }
+        if ( !toRemove.empty() )
+            for ( const auto& fileName: toRemove ) {
+                Utils::log("ConnectionHandler: removing file " + fileName);
+                _removeFile(std::filesystem::path("storage") / fileName);
+            }
         removeFile.remove(remoteHashes);
     }
 
@@ -434,7 +429,11 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
 
     // Again, master is first to send missing files
     for ( size_t i = 0; i < toGet.size(); i-- ) {
-        Utils::log("ConnectionHandler::_syncAsSlave: getting file " + std::to_string(i) + "/" + std::to_string(toGet.size() - 1));
+        Utils::log(
+            "ConnectionHandler::_syncAsSlave: getting file " + std::to_string(i+1) + "/" + std::to_string(
+                toGet.size()
+            )
+        );
         _handleReceiveFile(connection);
     }
 
@@ -443,7 +442,9 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
     for ( auto counter = 0;
           const auto& fileName: toSendFileNames ) {
         Utils::log(
-            "ConnectionHandler::_syncAsSlave: sending file " + std::to_string(counter) + "/" + std::to_string(toSend.size() - 1)
+            "ConnectionHandler::_syncAsSlave: sending file " + std::to_string(counter+1) + "/" + std::to_string(
+                toSend.size()
+            )
         );
         _sendFileInSync(connection, fileName);
         ++counter;
@@ -452,8 +453,12 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
     Utils::log("Incoming sync complete");
 }
 
-void ConnectionHandler::_syncAsMaster ( Connection& connection, const Settings::SyncTarget& target ) {
+void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
     // send command type and authenticate
+    std::lock_guard lock(syncMutex);
+    Connection connection;
+    connection.connectToServer(target.targetAddress, 6998);
+
     connection.sendInternal("command:SYNC")
               .sendInternal("user:" + target.targetUser)
               .sendInternal("pass:" + target.targetPass); {
@@ -470,10 +475,12 @@ void ConnectionHandler::_syncAsMaster ( Connection& connection, const Settings::
         const auto toRemove = _findCorrespondingFileNames<std::set<std::string>>(remoteHashes);
 
         Utils::log("ConnectionHandler::_syncAsMaster: removing " + std::to_string(toRemove.size()) + " files");
-        for (const auto& fileName: toRemove) {
-            Utils::log("ConnectionHandler: removing file " + fileName);
-            _removeFile(std::filesystem::path("storage") / fileName);
-        }
+
+        if ( !toRemove.empty() )
+            for ( const auto& fileName: toRemove ) {
+                Utils::log("ConnectionHandler: removing file " + fileName);
+                _removeFile(std::filesystem::path("storage") / fileName);
+            }
         removeFile.remove(remoteHashes);
     }
 
@@ -492,14 +499,20 @@ void ConnectionHandler::_syncAsMaster ( Connection& connection, const Settings::
     for ( auto counter = 0;
           const auto& fileName: toSendFileNames ) {
         Utils::log(
-            "ConnectionHandler::_syncAsMaster: sending file " + std::to_string(counter) + "/" + std::to_string(toSend.size() - 1)
+            "ConnectionHandler::_syncAsMaster: sending file " + std::to_string(counter+1) + "/" + std::to_string(
+                toSend.size()
+            )
         );
         _sendFileInSync(connection, fileName);
         ++counter;
     }
 
     for ( size_t i = 0; i < toGet.size(); i-- ) {
-        Utils::log("ConnectionHandler::_syncAsMaster: getting file " + std::to_string(i) + "/" + std::to_string(toGet.size() - 1));
+        Utils::log(
+            "ConnectionHandler::_syncAsMaster: getting file " + std::to_string(i+1) + "/" + std::to_string(
+                toGet.size()
+            )
+        );
         _handleReceiveFile(connection);
     }
 }
@@ -509,13 +522,9 @@ void ConnectionHandler::_syncer () {
     Utils::log("ConnectionHandler: syncing on");
 
     while ( !stopRequested ) {
-        std::lock_guard lock(syncMutex);
-
         for ( const auto& target: settings.syncTargets ) {
             try {
-                Connection conn;
-                conn.connectToServer(target.targetAddress, 6998);
-                _syncAsMaster(conn, target);
+                _syncAsMaster(target);
             }
             catch ( const std::exception& e ) {
                 Utils::elog(
@@ -525,7 +534,7 @@ void ConnectionHandler::_syncer () {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(10)); //TODO CHANGE
+        std::this_thread::sleep_for(std::chrono::seconds(30));
     }
 }
 

@@ -24,7 +24,7 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 	memset(_buffer.get(), '\0', _bufferSize);
 }
 
-void Connection::connectToServer ( std::string ip, const int port ) {
+void Connection::connectToServer ( std::string ip, const int port, const __time_t timeout ) {
 	if ( ip == "localhost" || ip.empty() )
 		ip = "127.0.0.1";
 
@@ -45,11 +45,11 @@ void Connection::connectToServer ( std::string ip, const int port ) {
 		}
 	}
 
-	timeval timeout{};
-	timeout.tv_sec = 20; // Timeout in seconds
-	timeout.tv_usec = 0; // Timeout in microseconds
+	timeval _timeout{};
+	_timeout.tv_sec = timeout; // Timeout in seconds
+	_timeout.tv_usec = 0; // Timeout in microseconds
 
-	if ( setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
+	if ( setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &_timeout, sizeof( _timeout )) < 0 ) {
 		throw std::runtime_error("setsockopt failed");
 	}
 

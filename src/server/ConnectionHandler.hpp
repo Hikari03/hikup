@@ -60,7 +60,7 @@ private:
     T _findCorrespondingFileNames ( const std::set<std::string>& toFind ) const;
 
     void _syncAsSlave ( ConnectionServer& connection );
-    void _syncAsMaster ( Connection& connection, const Settings::SyncTarget& target );
+    void _syncAsMaster ( const Settings::SyncTarget& target );
     void _syncer ();
 
     template < SetOrVectorOfString T >
