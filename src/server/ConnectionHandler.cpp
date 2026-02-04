@@ -244,7 +244,7 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 }
 
 void ConnectionHandler::_removeOnSyncedTargets ( const std::string& hash ) {
-    if ( removeFile.add(hash) )
+    if ( !removeFile.add(hash) )
         Utils::elog("removeOnSyncedTargets: Could not record hash into file");
 
     for ( const auto& target: settings.syncTargets ) {
@@ -407,13 +407,15 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
         const auto localHashes = removeFile.list();
         connection.sendData(_generateHashesString(localHashes));
 
-        Utils::log("ConnectionHandler::_syncAsSlave: removing " + std::to_string(toRemove.size()) + " files");
-        if ( !toRemove.empty() )
+        if ( !toRemove.empty() ) {
+            Utils::log("ConnectionHandler::_syncAsSlave: removing " + std::to_string(toRemove.size()) + " files");
+
             for ( const auto& fileName: toRemove ) {
                 Utils::log("ConnectionHandler: removing file " + fileName);
                 _removeFile(std::filesystem::path("storage") / fileName);
             }
-        removeFile.remove(remoteHashes);
+            removeFile.remove(remoteHashes);
+        }
     }
 
     // ###################################### File exchange
@@ -474,14 +476,16 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
         const auto remoteHashes = _parseHashes<std::set<std::string>>(connection.receiveData());
         const auto toRemove = _findCorrespondingFileNames<std::set<std::string>>(remoteHashes);
 
-        Utils::log("ConnectionHandler::_syncAsMaster: removing " + std::to_string(toRemove.size()) + " files");
+        if ( !toRemove.empty() ){
+            Utils::log("ConnectionHandler::_syncAsMaster: removing " + std::to_string(toRemove.size()) + " files");
 
-        if ( !toRemove.empty() )
             for ( const auto& fileName: toRemove ) {
                 Utils::log("ConnectionHandler: removing file " + fileName);
                 _removeFile(std::filesystem::path("storage") / fileName);
             }
-        removeFile.remove(remoteHashes);
+            removeFile.remove(remoteHashes);
+        }
+
     }
 
 
