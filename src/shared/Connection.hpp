@@ -49,7 +49,7 @@ public:
 
 	~Connection ();
 
-	void connectToServer ( std::string ip, int port, __time_t timeout = 20 );
+	void connectToServer ( std::string ip, int port, time_t timeout = 20 );
 
 	Connection& send ( const std::string& message );
 

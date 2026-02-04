@@ -24,7 +24,7 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 	memset(_buffer.get(), '\0', _bufferSize);
 }
 
-void Connection::connectToServer ( std::string ip, const int port, const __time_t timeout ) {
+void Connection::connectToServer ( std::string ip, const int port, const time_t timeout ) {
 	if ( ip == "localhost" || ip.empty() )
 		ip = "127.0.0.1";
 
