@@ -85,6 +85,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
     std::ranges::replace(fileName, '.', '<');
 
     std::filesystem::path _path = std::filesystem::current_path() / "storage" / ( fileName + '.' + hashFromClient );
+    std::filesystem::path downloadPath = std::filesystem::current_path() / ( fileName + '.' + hashFromClient );
 
     if ( std::filesystem::exists(_path) ) {
         Utils::log("receiveFile: file already exists");
@@ -97,7 +98,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
     removeFile.remove(hashFromClient);
 
-    std::ofstream file(_path, std::ios::binary);
+    std::ofstream file(downloadPath, std::ios::binary);
 
     Utils::log("receiveFile: starting download of size: " + std::to_string(fileSize));
 
@@ -113,7 +114,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
         catch ( const std::exception& e ) {
             std::cerr << "receiveFile: error receiving message: " << e.what() << std::endl;
             file.close();
-            std::filesystem::remove(_path);
+            std::filesystem::remove(downloadPath);
             connection.sendInternal("fail");
             return;
         }
@@ -150,6 +151,8 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
         connection.sendInternal("Sent hash and calculated hash do not match");
         return;
     }
+    
+    std::filesystem::rename(downloadPath, _path);
 
     connection.sendInternal("OK");
 
