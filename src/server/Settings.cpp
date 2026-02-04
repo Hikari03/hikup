@@ -16,6 +16,7 @@ Settings::Settings ( const Settings& other ) {
     httpProtocol = other.httpProtocol;
     hostname = other.hostname;
     syncTargets = other.syncTargets;
+    syncPeriod = other.syncPeriod;
 }
 
 Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
@@ -65,6 +66,7 @@ Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
             ++it;
         }
     }
+    result.syncPeriod = settings["syncTargets"]["syncPeriod"].as_integer()->value_or(30);
 
 
     return result;
@@ -92,9 +94,10 @@ std::string Settings::toString () const {
                     result += "    address: " + targetAddress + '\n';
                     result += "    user: " + targetUser + '\n';
                     result += "    pass: " + targetPass + '\n';
-                    result += "    we are: ";
                     result += "\n";
                 }
+
+                result += "  syncPeriod: " + std::to_string(syncPeriod) + '\n';
                 return result;
             }();
 

@@ -21,7 +21,7 @@ concept SetOrVectorOfString =
 
 class ConnectionHandler {
 public:
-    explicit ConnectionHandler ( Settings settings );
+    explicit ConnectionHandler ( const Settings& settings );
 
     void addClient ( ClientInfo client );
 

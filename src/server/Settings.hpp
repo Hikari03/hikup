@@ -19,6 +19,7 @@ struct Settings {
     std::string hostname;
     std::string httpProtocol;
     std::vector<SyncTarget> syncTargets;
+    int syncPeriod;
 
     bool wantHttp = false;
 

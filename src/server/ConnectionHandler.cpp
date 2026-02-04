@@ -12,7 +12,7 @@
 #include "includes/toml.hpp"
 
 
-ConnectionHandler::ConnectionHandler ( Settings settings )
+ConnectionHandler::ConnectionHandler ( const Settings& settings )
     : removeFile("settings/toRemove.toml")
   , settings(settings) {
     if ( !settings.syncTargets.empty() )
@@ -538,7 +538,7 @@ void ConnectionHandler::_syncer () {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::this_thread::sleep_for(std::chrono::seconds(settings.syncPeriod));
     }
 }
 

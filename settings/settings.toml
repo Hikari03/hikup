@@ -12,3 +12,4 @@ hostname = "example.org" # external hostname only for printing http links
 targets = [ # array of quadruplets of display name, address, remote user, remote pass
 #    { name = "exampleName", address = "example.org", user = "admin", pass = "admin"}
 ]
+syncPeriod = 30 # in seconds
