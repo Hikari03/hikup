@@ -6,8 +6,10 @@
 
 #include "ClientInfo.hpp"
 #include "ConnectionServer.hpp"
+#include "RemovalTracker.hpp"
 #include "Settings.hpp"
 #include "../shared/Connection.hpp"
+#include "includes/toml.hpp"
 
 template < typename T >
 concept ConnType = std::same_as<T, ConnectionServer> || std::same_as<T, Connection>;
@@ -27,10 +29,11 @@ public:
 
 private:
     bool stopRequested = false;
-    std::vector<std::jthread> clientThreads;
-    const Settings settings;
     std::jthread syncThread;
+    std::vector<std::jthread> clientThreads;
     std::mutex syncMutex;
+    RemovalTracker removeFile;
+    const Settings settings;
 
 
     void _serveConnection ( ClientInfo client );
@@ -38,15 +41,17 @@ private:
     [[nodiscard]] bool _auth ( const std::string& user, const std::string& pass ) const;
 
     template < ConnType T >
-    void _receiveFile ( T& connection ) const;
+    void _handleReceiveFile ( T& connection );
 
-    static void _sendFile ( ConnectionServer& connection );
+    static void _handleSendFile ( ConnectionServer& connection );
 
-    void _removeOnSynced ( const std::string& hash ) const;
+    void _removeOnSyncedTargets ( const std::string& hash );
 
-    void _removeFile ( ConnectionServer& connection );
+    void _handleRemoveFile ( ConnectionServer& connection );
 
-    void _listFiles ( ConnectionServer& connection ) const;
+    void _handleListFiles ( ConnectionServer& connection ) const;
+
+    // internal
 
     template < ConnType T >
     static void _sendFileInSync ( T& connection, const std::string& fileName );
@@ -54,8 +59,8 @@ private:
     template < SetOrVectorOfString T >
     T _findCorrespondingFileNames ( const std::set<std::string>& toFind ) const;
 
-    void _syncAsSlave ( ConnectionServer& connection ) const;
-    void _syncAsMaster ( Connection& connection, const Settings::SyncTarget& target ) const;
+    void _syncAsSlave ( ConnectionServer& connection );
+    void _syncAsMaster ( Connection& connection, const Settings::SyncTarget& target );
     void _syncer ();
 
     template < SetOrVectorOfString T >
@@ -67,6 +72,6 @@ private:
     template < SetOrVectorOfString T >
     static std::string _generateHashesString ( const T& hashes );
 
-
+    static void _removeFile ( const std::filesystem::path& path );
     void _cleanupClientThreads ();
 };

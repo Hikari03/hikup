@@ -3,11 +3,7 @@
 #include "utils.hpp"
 #include "includes/toml.hpp"
 
-std::string operator+ ( const std::string& lhs, const toml::source_position& rhs ) {
-    std::stringstream rhs1;
-    rhs1 << lhs << rhs;
-    return rhs1.str();
-}
+
 
 Settings::Settings ( const Settings& other ) {
 
