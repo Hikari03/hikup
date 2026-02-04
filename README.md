@@ -13,6 +13,8 @@
     2. Share the generated hash or link with designated recipients.
     3. Recipients can use the hash to download the file directly from the server using the `hikup` command or with HTTP.
 
+- **Redundant servers**: Sync between servers easily.
+
 > [!NOTE]
 > If you append `?view=yes` to the HTTP link, you can view the file directly in the browser.
 
@@ -48,6 +50,13 @@ cmake --build build --target hikup -j $(nproc)
 
 ### Settings
 - All available runtime settings are in `settings/settings.toml` with descriptions.
+
+### Sync
+- Sync files between servers in declared periods.
+- To use this, add target in settings in `[syncTargets]` section.
+- 
+> [!WARNING]
+>**The declared target will be the master in one case**: if you uploaded a removed file and that removal synced. Which means if you again upload this file on non-master, your master will remove it on the next sync.
 
 ### Default Ports
 - **Hikup protocol**: 6998
