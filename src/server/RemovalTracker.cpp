@@ -3,6 +3,9 @@
 #include "utils.hpp"
 
 RemovalTracker::RemovalTracker( const std::filesystem::path& path ) : filePath(path) {
+
+    std::ofstream {path};
+
     try { root = toml::parse_file(path.string()); }
     catch ( const toml::parse_error& err ) {
         Utils::elog(
@@ -15,9 +18,7 @@ RemovalTracker::RemovalTracker( const std::filesystem::path& path ) : filePath(p
     }
 
     if ( root.empty() ) {
-        throw std::runtime_error(
-            "Could not load toRemove from " + path.string()
-        );
+        root.insert("toRemove", toml::array{});
     }
 }
 
