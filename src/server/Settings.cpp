@@ -63,8 +63,7 @@ Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
                 target->get("name")->as_string()->value_or("INVALID"),
                 target->get("address")->as_string()->value_or("INVALID"),
                 target->get("user")->as_string()->value_or("INVALID"),
-                target->get("pass")->as_string()->value_or("INVALID"),
-                target->get("isMaster")->as_boolean()->value_or(false)
+                target->get("pass")->as_string()->value_or("INVALID")
             );
 
             ++it;
@@ -92,13 +91,12 @@ std::string Settings::toString () const {
 
                 std::string result = "syncTargets:\n";
 
-                for ( const auto& [targetName, targetAddress, targetUser, targetPass, master] : syncTargets ) {
+                for ( const auto& [targetName, targetAddress, targetUser, targetPass] : syncTargets ) {
                     result += "  " + targetName + ":\n";
                     result += "    address: " + targetAddress + '\n';
                     result += "    user: " + targetUser + '\n';
                     result += "    pass: " + targetPass + '\n';
                     result += "    we are: ";
-                    result += master ? "master" : "slave";
                     result += "\n";
                 }
                 return result;

@@ -9,6 +9,6 @@ httpProtocol = "http" # external http or https, useful when behind reverse proxy
 hostname = "example.org" # external hostname only for printing http links
 
 [syncTargets]
-targets = [ # array of quintuplets of display name, address, remote user, remote pass and a bool value of whether this server is master, otherwise slave
-#    { name = "exampleName", address = "example.org", user = "admin", pass = "admin", isMaster = true }
+targets = [ # array of quadruplets of display name, address, remote user, remote pass
+#    { name = "exampleName", address = "example.org", user = "admin", pass = "admin"}
 ]
