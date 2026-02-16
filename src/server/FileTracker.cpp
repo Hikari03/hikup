@@ -1,10 +1,10 @@
-#include "RemovalTracker.hpp"
+#include "FileTracker.hpp"
 
 #include "utils.hpp"
 
-RemovalTracker::RemovalTracker( const std::filesystem::path& path ) : filePath(path) {
+FileTracker::FileTracker( const std::filesystem::path& path ) : filePath(path) {
 
-    std::ofstream {path};
+    std::ofstream {path}; // touch the file
 
     try { root = toml::parse_file(path.string()); }
     catch ( const toml::parse_error& err ) {
@@ -13,20 +13,20 @@ RemovalTracker::RemovalTracker( const std::filesystem::path& path ) : filePath(p
             source().begin + ")\n"
         );
         throw std::runtime_error(
-            "Could not load toRemove from " + path.string()
+            "Could not load array from " + path.string()
         );
     }
 
     if ( root.empty() ) {
-        root.insert("toRemove", toml::array{});
+        root.insert("array", toml::array{});
     }
 }
 
-bool RemovalTracker::add ( const std::set<std::string>& additions ) {
+bool FileTracker::add ( const std::set<std::string>& additions ) {
     toml::array* arr = nullptr;
 
     // Check if the key "my_strings" exists and is an array
-    if ( const auto val = root["toRemove"]; val)
+    if ( const auto val = root["array"]; val)
     {
         if ( const auto existing_arr = val.as_array())
         {
@@ -34,15 +34,15 @@ bool RemovalTracker::add ( const std::set<std::string>& additions ) {
         }
         else
         {
-            Utils::elog("\"toRemove\" exists but is not an array");
+            Utils::elog("\"array\" exists but is not an array");
             return false;
         }
     }
     else
     {
         // Create the array in root table
-        root.insert("toRemove", toml::array{});
-        arr = root["toRemove"].as_array();
+        root.insert("array", toml::array{});
+        arr = root["array"].as_array();
     }
 
     if (!arr)
@@ -78,11 +78,11 @@ bool RemovalTracker::add ( const std::set<std::string>& additions ) {
     return true;
 }
 
-bool RemovalTracker::add ( const std::string& addition ) {
+bool FileTracker::add ( const std::string& addition ) {
     toml::array* arr = nullptr;
 
         // Check if the key "my_strings" exists and is an array
-        if ( const auto val = root["toRemove"]; val)
+        if ( const auto val = root["array"]; val)
         {
             if ( const auto existing_arr = val.as_array())
             {
@@ -90,15 +90,15 @@ bool RemovalTracker::add ( const std::string& addition ) {
             }
             else
             {
-                Utils::elog("\"toRemove\" exists but is not an array");
+                Utils::elog("\"array\" exists but is not an array");
                 return false;
             }
         }
         else
         {
             // Create the array in root table
-            root.insert("toRemove", toml::array{});
-            arr = root["toRemove"].as_array();
+            root.insert("array", toml::array{});
+            arr = root["array"].as_array();
         }
 
         if (!arr)
@@ -133,8 +133,8 @@ bool RemovalTracker::add ( const std::string& addition ) {
         return true;
 }
 
-void RemovalTracker::remove ( const std::set<std::string>& toRemove ) {
-    if ( const auto val = root["toRemove"]; val )
+void FileTracker::remove ( const std::set<std::string>& toRemove ) {
+    if ( const auto val = root["array"]; val )
     {
         if ( val.is_array() )
         {
@@ -154,7 +154,7 @@ void RemovalTracker::remove ( const std::set<std::string>& toRemove ) {
         }
         else
         {
-            Utils::elog("\"toRemove\" exists but is not an array");
+            Utils::elog("\"array\" exists but is not an array");
         }
     }
 
@@ -166,9 +166,9 @@ void RemovalTracker::remove ( const std::set<std::string>& toRemove ) {
     out << root;
 }
 
-void RemovalTracker::remove ( const std::string& toRemove ) {
+void FileTracker::remove ( const std::string& toRemove ) {
 
-    if ( const auto val = root["toRemove"]; val )
+    if ( const auto val = root["array"]; val )
     {
         if ( val.is_array() )
         {
@@ -188,7 +188,7 @@ void RemovalTracker::remove ( const std::string& toRemove ) {
         }
         else
         {
-            Utils::elog("\"toRemove\" exists but is not an array");
+            Utils::elog("\"array\" exists but is not an array");
         }
     }
 
@@ -200,22 +200,22 @@ void RemovalTracker::remove ( const std::string& toRemove ) {
     out << root;
 }
 
-std::set<std::string> RemovalTracker::list () const {
+std::set<std::string> FileTracker::list () const {
     std::set<std::string> hashes;
 
 
-    const toml::node* toRemoveNode = root.get("toRemove");
-    if (!toRemoveNode)
+    const toml::node* arrayNode = root.get("array");
+    if (!arrayNode)
     {
-        // No "toRemove" key, return empty set
+        // No "array" key, return empty set
         return hashes;
     }
 
-    const toml::array* arr = toRemoveNode->as_array();
+    const toml::array* arr = arrayNode->as_array();
     if (!arr)
     {
-        Utils::elog("\"toRemove\" key is not an array in TOML file: " + filePath.string());
-        throw std::runtime_error("\"toRemove\" is not an array");
+        Utils::elog("\"array\" key is not an array in TOML file: " + filePath.string());
+        throw std::runtime_error("\"array\" is not an array");
     }
 
     for ( const auto& item : *arr )
@@ -226,7 +226,7 @@ std::set<std::string> RemovalTracker::list () const {
         }
         else
         {
-            Utils::elog("One item in toRemove array is not a string");
+            Utils::elog("One item in array array is not a string");
             // optionally skip or throw; here skip.
         }
     }
