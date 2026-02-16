@@ -44,7 +44,7 @@ private:
     template < ConnType T >
     void _handleReceiveFile ( T& connection );
 
-    static void _handleSendFile ( ConnectionServer& connection );
+    void _handleSendFile ( ConnectionServer& connection );
 
     void _removeOnSyncedTargets ( const std::string& hash );
 
@@ -57,18 +57,12 @@ private:
     template < ConnType T >
     static void _sendFileInSync ( T& connection, const std::string& fileName );
 
-    template < SetOrVectorOfString T >
-    T _findCorrespondingFileNames ( const std::set<std::string>& toFind ) const;
-
     void _syncAsSlave ( ConnectionServer& connection );
     void _syncAsMaster ( const Settings::SyncTarget& target );
     void _syncer ();
 
     template < SetOrVectorOfString T >
     static T _parseHashes ( const std::string& hashesString );
-
-    template < SetOrVectorOfString T >
-    static T _getLocalFileHashes ();
 
     template < SetOrVectorOfString T >
     static std::string _generateHashesString ( const T& hashes );

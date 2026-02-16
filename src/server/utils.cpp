@@ -31,6 +31,41 @@ namespace Utils {
         else
             std::cerr << std::flush;
     }
+
+    namespace FS {
+
+
+
+
+
+        template < SetOrVectorOfString T >
+        T findCorrespondingFileNames ( const std::set<std::string>& toFind ) {
+            const auto directory = std::filesystem::current_path() / "storage";
+
+            T result;
+
+            for ( const auto& entry: std::filesystem::directory_iterator(directory) ) {
+                if ( toFind.contains(entry.path().extension().string().substr(1)) ) {
+                    result.emplace(entry.path().filename().string());
+                }
+            }
+
+            return result;
+        }
+
+        template < SetOrVectorOfString T >
+        T _getLocalFileHashes () {
+            T hashes;
+
+            for ( const auto directory = std::filesystem::current_path() / "storage";
+                const auto& file: std::filesystem::directory_iterator(directory) ) {
+
+                hashes.emplace(file.path().extension().string().substr(1));
+                }
+
+            return hashes;
+        }
+    }
 }
 
 

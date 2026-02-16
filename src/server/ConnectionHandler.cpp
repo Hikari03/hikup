@@ -86,7 +86,6 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 	std::ranges::replace(fileName, '.', '<');
 
 	std::filesystem::path _path = std::filesystem::current_path() / "storage" / ( fileName + '.' + hashFromClient );
-	std::filesystem::path downloadPath = std::filesystem::current_path() / ( fileName + '.' + hashFromClient );
 
 	if ( std::filesystem::exists(_path) ) {
 		Utils::log("receiveFile: file already exists");
@@ -99,7 +98,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
 	_markedForRemoval.remove(hashFromClient);
 
-	std::ofstream file(downloadPath, std::ios::binary);
+	std::ofstream file(_path, std::ios::binary);
 
 	Utils::log("receiveFile: starting download of size: " + std::to_string(fileSize));
 
@@ -115,7 +114,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 		catch ( const std::exception& e ) {
 			std::cerr << "receiveFile: error receiving message: " << e.what() << std::endl;
 			file.close();
-			std::filesystem::remove(downloadPath);
+			std::filesystem::remove(_path);
 			connection.sendInternal("fail");
 			return;
 		}
@@ -151,10 +150,10 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 		return;
 	}
 
-	std::filesystem::copy(downloadPath, _path);
-	std::filesystem::remove(downloadPath);
-
 	connection.sendInternal("OK");
+
+	if ( !_readyFiles.add(hashString) )
+		throw std::logic_error("_handleReceiveFile: could not add file into readyFiles");
 
 	std::filesystem::create_symlink(_path, std::filesystem::current_path() / "links" / oldFileName);
 
@@ -174,7 +173,13 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 
 	if ( fileName.empty() ) {
 		Utils::log("sendFile: file not found");
-		connection.sendInternal("NO");
+		connection.sendInternal("File not found");
+		return;
+	}
+
+	if ( _readyFiles.list().contains(fileName) ) {
+		Utils::log("sendFile: file is being uploaded");
+		connection.sendInternal("File is being uploaded, try again later");
 		return;
 	}
 
@@ -285,6 +290,8 @@ void ConnectionHandler::_handleRemoveFile ( ConnectionServer& connection ) {
 	}
 	connection.sendInternal("OK");
 	_removeFile(fileName);
+
+	_readyFiles.remove(hash);
 
 	std::lock_guard lock(_syncMutex);
 	_removeOnSyncedTargets(hash);
@@ -404,7 +411,7 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
 	// ###################################### File removal
 	{
 		const auto remoteHashes = _parseHashes<std::set<std::string>>(connection.receiveData());
-		const auto toRemove = _findCorrespondingFileNames<std::set<std::string>>(remoteHashes);
+		const auto toRemove = Utils::FS::findCorrespondingFileNames<std::set<std::string>>(remoteHashes);
 		const auto localHashes = _markedForRemoval.list();
 		connection.sendData(_generateHashesString(localHashes));
 
@@ -424,7 +431,7 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
 	const auto remoteHashes = _parseHashes<std::set<std::string>>(connection.receiveData());
 
 	// Now we do the same
-	const auto localHashes = _getLocalFileHashes<std::set<std::string>>();
+	const auto localHashes = _readyFiles.list();
 	connection.sendData(_generateHashesString(localHashes));
 
 	const auto toGet = remoteHashes / localHashes;
@@ -438,7 +445,7 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
 		_handleReceiveFile(connection);
 	}
 
-	const auto toSendFileNames = _findCorrespondingFileNames<std::set<std::string>>(toSend);
+	const auto toSendFileNames = Utils::FS::findCorrespondingFileNames<std::set<std::string>>(toSend);
 
 	for ( auto counter = 0; const auto& fileName: toSendFileNames ) {
 		Utils::log(
@@ -457,8 +464,11 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 	Connection connection;
 	connection.connectToServer(target.targetAddress, 6998);
 
-	connection.sendInternal("command:SYNC").sendInternal("user:" + target.targetUser).sendInternal(
-		"pass:" + target.targetPass); {
+	connection.sendInternal("command:SYNC")
+		.sendInternal("user:" + target.targetUser)
+		.sendInternal("pass:" + target.targetPass);
+
+	{
 		if ( const auto response = connection.receiveInternal(); response != "OK" ) {
 			throw std::runtime_error(response);
 		}
@@ -470,7 +480,7 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 		connection.sendData(_generateHashesString(localHashes));
 
 		const auto remoteHashes = _parseHashes<std::set<std::string>>(connection.receiveData());
-		const auto toRemove = _findCorrespondingFileNames<std::set<std::string>>(remoteHashes);
+		const auto toRemove = Utils::FS::findCorrespondingFileNames<std::set<std::string>>(remoteHashes);
 
 		if ( !toRemove.empty() ) {
 			Utils::log("ConnectionHandler::_syncAsMaster: removing " + std::to_string(toRemove.size()) + " files");
@@ -485,7 +495,7 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 
 
 	// ###################################### File exchange
-	const auto localHashes = _getLocalFileHashes<std::set<std::string>>();
+	const auto localHashes = _readyFiles.list();
 	connection.sendData(_generateHashesString(localHashes));
 
 	const auto remoteHashes = _parseHashes<std::set<std::string>>(connection.receiveData());
@@ -493,7 +503,7 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 	const auto toGet = remoteHashes / localHashes;
 	const auto toSend = localHashes / remoteHashes;
 
-	const auto toSendFileNames = _findCorrespondingFileNames<std::set<std::string>>(toSend);
+	const auto toSendFileNames = Utils::FS::findCorrespondingFileNames<std::set<std::string>>(toSend);
 
 	for ( auto counter = 0; const auto& fileName: toSendFileNames ) {
 		Utils::log(
@@ -529,21 +539,6 @@ void ConnectionHandler::_syncer () {
 	}
 }
 
-template < SetOrVectorOfString T >
-T ConnectionHandler::_findCorrespondingFileNames ( const std::set<std::string>& toFind ) const {
-	const auto directory = std::filesystem::current_path() / "storage";
-
-	T result;
-
-	for ( const auto& entry: std::filesystem::directory_iterator(directory) ) {
-		if ( toFind.contains(entry.path().extension().string().substr(1)) ) {
-			result.emplace(entry.path().filename().string());
-		}
-	}
-
-	return result;
-}
-
 // Parses string in 'hash|hash|...|' format into an array
 template < SetOrVectorOfString T >
 T ConnectionHandler::_parseHashes ( const std::string& hashesString ) {
@@ -565,17 +560,7 @@ T ConnectionHandler::_parseHashes ( const std::string& hashesString ) {
 	return hashes;
 }
 
-template < SetOrVectorOfString T >
-T ConnectionHandler::_getLocalFileHashes () {
-	T hashes;
 
-	for ( const auto directory = std::filesystem::current_path() / "storage"; const auto& file:
-	      std::filesystem::directory_iterator(directory) ) {
-		hashes.emplace(file.path().extension().string().substr(1));
-	}
-
-	return hashes;
-}
 
 template < SetOrVectorOfString T >
 std::string ConnectionHandler::_generateHashesString ( const T& hashes ) {

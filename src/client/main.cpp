@@ -350,11 +350,11 @@ int start ( int argc, char* argv[] ) {
         connection.sendInternal("hash:" + fileName);
     }
 
-    if ( connection.receiveInternal() != "OK" ) {
+    if ( const auto reason = connection.receiveInternal(); reason != "OK" ) {
         std::cerr << colorize("Server did not accept the request\n", Color::RED);
 
         if ( command == Command::Type::UPLOAD ) {
-            std::cout << colorize("Reason: file already exists\n", Color::RED) << colorize("Hash: ", Color::PURPLE) <<
+            std::cout << colorize("Reason: " + reason + '\n', Color::RED) << colorize("Hash: ", Color::PURPLE) <<
                     colorize(hash, Color::CYAN) << std::endl;
             const auto httpLink = connection.receiveInternal();
             std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink, Color::CYAN) << std::endl;
