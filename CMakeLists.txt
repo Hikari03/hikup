@@ -51,8 +51,8 @@ add_executable(hikup-server src/server/main.cpp
         src/server/Settings.cpp
         src/server/utils.cpp
         src/server/utils.hpp
-        src/server/RemovalTracker.cpp
-        src/server/RemovalTracker.hpp)
+        src/server/FileTracker.cpp
+        src/server/FileTracker.hpp)
 
 target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hikup ${LIBSODIUM_LIBRARIES})

@@ -5,15 +5,15 @@
 
 #include "includes/toml.hpp"
 
-class RemovalTracker {
+class FileTracker {
 public:
-    explicit RemovalTracker( const std::filesystem::path& path );
+    explicit FileTracker( const std::filesystem::path& path );
 
-    [[nodiscard]] bool add ( const std::set<std::string>& additions );
-    [[nodiscard]] bool add ( const std::string& addition );
+    void add ( const std::set<std::string>& additions );
+    void add ( const std::string& addition );
     void remove ( const std::set<std::string>& toRemove );
     void remove ( const std::string& toRemove );
-    std::set<std::string> list ( ) const;
+    [[nodiscard]] std::set<std::string> list ( ) const;
 
 private:
     toml::table root;
