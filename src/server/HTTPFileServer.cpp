@@ -95,14 +95,14 @@ void HTTPFileServer::_ev_handler ( mg_connection* c, const int ev, void* ev_data
 		const auto path = HTTPFileServerVars::_rootDir + filePath;
 
 		if ( strcmp(buf, "yes") == 0 ) {
-			static const auto header = "Content-Disposition: filename=\"" + filePath.substr(1) + "\"\r\n";
+			const auto header = "Content-Disposition: filename=\"" + filePath.substr(1) + "\"\r\n";
 			opts.extra_headers = header.c_str();
 			MG_INFO(("Serving file: %s", path.c_str()));
 			mg_http_serve_file(c, hm, path.c_str(), &opts);
 			return;
 		}
 		if ( strcmp(buf, "no") == 0 ) {
-			static const auto download_header = std::string("Content-Disposition: attachment; filename=\"") + filePath.substr(1) + "\"\r\n";
+			const auto download_header = std::string("Content-Disposition: attachment; filename=\"") + filePath.substr(1) + "\"\r\n";
 			opts.extra_headers = download_header.c_str();
 			MG_INFO(("Serving file: %s", path.c_str()));
 			mg_http_serve_file(c, hm, path.c_str(), &opts);
