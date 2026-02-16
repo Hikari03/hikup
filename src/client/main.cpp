@@ -126,7 +126,6 @@ void sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Con
 #endif
 
     connection.sendInternal("DONE");
-    std::cout << "sent done" << std::endl;
     if ( const auto confirmation = connection.receiveInternal();
         confirmation != "OK") {
         std::cout << colorize("Upload failed with response: " + confirmation, Color::RED);

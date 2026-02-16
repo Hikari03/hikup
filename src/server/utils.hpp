@@ -13,16 +13,13 @@ namespace Utils {
     void elog ( const std::string& message, bool newline = true );
 
     namespace FS {
-        template < typename T >
-        concept SetOrVectorOfString =
-        std::same_as<T, std::vector<std::string>> ||
-        std::same_as<T, std::set<std::string>>;
+        std::set<std::string> findCorrespondingFileNames ( const std::set<std::string>& hash );
 
-        template < SetOrVectorOfString T >
-        T findCorrespondingFileNames ( const std::set<std::string>& toFind );
+        std::optional<std::string> findCorrespondingFileName ( const std::string& hash );
 
-        template < SetOrVectorOfString T >
-        T _getLocalFileHashes ();
+        std::set<std::string> getLocalFileHashes ();
+
+        std::optional<std::string> getLocalRawFileName ( const std::string& filename );
 
     }
 }
