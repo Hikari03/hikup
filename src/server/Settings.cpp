@@ -10,6 +10,7 @@ Settings::Settings ( const Settings& other ) {
     if (this == &other)
         return;
 
+    wantHttp = other.wantHttp;
     authUser = other.authUser;
     authPass = other.authPass;
     httpAddress = other.httpAddress;
