@@ -174,7 +174,7 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 		return;
 	}
 
-	if ( !_readyFiles.list().contains(fileName) ) {
+	if ( !_readyFiles.list().contains(hash) ) {
 		Utils::log("sendFile: file is being uploaded");
 		connection.sendInternal("File is being uploaded, try again later");
 		return;
@@ -285,7 +285,7 @@ void ConnectionHandler::_handleRemoveFile ( ConnectionServer& connection ) {
 		return;
 	}
 
-	if ( !_readyFiles.list().contains(fileName) ) {
+	if ( !_readyFiles.list().contains(hash) ) {
 		Utils::log("_handleRemoveFile: file is being uploaded");
 		connection.sendInternal("File is being uploaded, try again later");
 		return;
