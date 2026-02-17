@@ -4,7 +4,7 @@
 
 FileTracker::FileTracker ( const std::filesystem::path& path )
 	: filePath(path) {
-	std::ofstream out(path); // touch the file
+	std::ofstream out(path, std::ios_base::ate); // touch the file
 
 	try { root = toml::parse_file(path.string()); }
 	catch ( const toml::parse_error& err ) {
