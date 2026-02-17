@@ -14,11 +14,7 @@ FileTracker::FileTracker ( const std::filesystem::path& path )
 		throw std::runtime_error("Could not load array from " + path.string());
 	}
 
-	if ( root.empty() )
-		root.insert("array", toml::array{});
-
 	if ( !out ) { throw std::runtime_error("FileTracker::add: Cannot open file for writing"); }
-	out << root;
 
 	out.close();
 }
