@@ -359,7 +359,7 @@ int start ( int argc, char* argv[] ) {
             std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink, Color::CYAN) << std::endl;
         }
 
-        else { std::cout << colorize("Reason: file does not exist", Color::RED) << std::endl; }
+        else { std::cout << colorize("Reason: " + reason, Color::RED) << std::endl; }
         return 1;
     }
 

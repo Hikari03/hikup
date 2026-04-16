@@ -1,10 +1,12 @@
 #include "FileTracker.hpp"
 
+#include <iostream>
+
 #include "utils.hpp"
 
 FileTracker::FileTracker ( const std::filesystem::path& path )
 	: filePath(path) {
-	std::ofstream{path}; // touch the file
+	std::ofstream out(path, std::ios_base::app); // touch the file
 
 	try { root = toml::parse_file(path.string()); }
 	catch ( const toml::parse_error& err ) {
@@ -14,8 +16,9 @@ FileTracker::FileTracker ( const std::filesystem::path& path )
 		throw std::runtime_error("Could not load array from " + path.string());
 	}
 
-	if ( root.empty() )
-		root.insert("array", toml::array{});
+	if ( !out ) { throw std::runtime_error("FileTracker::add: Cannot open file for writing"); }
+
+	out.close();
 }
 
 void FileTracker::add ( const std::set<std::string>& additions ) {
