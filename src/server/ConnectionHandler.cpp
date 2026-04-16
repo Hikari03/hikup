@@ -6,6 +6,7 @@
 #include <set>
 #include <utility>
 
+#include "HTTPFileServer.hpp"
 #include "utils.hpp"
 #include "../shared/FileInfo.hpp"
 #include "../shared/utils.hpp"
@@ -152,12 +153,12 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
 	_readyFiles.add(hashString);
 
-	std::filesystem::create_symlink(_path, std::filesystem::current_path() / "links" / oldFileName);
+	auto HTTPLinkString = HTTPFileServer::createSymlinkFor(_path);
 
 	connection.sendInternal(hashString);
 	connection.sendInternal(std::to_string(_settings.wantHttp));
 	if ( _settings.wantHttp )
-		connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + hashString);
+		connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + HTTPLinkString);
 }
 
 void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
@@ -573,14 +574,11 @@ std::string ConnectionHandler::_generateHashesString ( const T& hashes ) {
 }
 
 void ConnectionHandler::_removeFile ( const std::filesystem::path& path ) {
-	auto symlinkName = path.filename().string().substr(0, path.filename().string().find('.'));
-	std::ranges::replace(symlinkName, '<', '.');
 
-	Utils::log(
-		"removeFile: removing files: " + ( std::filesystem::current_path() / "links" / symlinkName ).string() + ", " +
-		path.string());
 
-	std::filesystem::remove(std::filesystem::current_path() / "links" / symlinkName);
+	Utils::log("removeFile: removing files: " + path.string());
+
+	HTTPFileServer::removeSymlinkFor(path);
 	std::filesystem::remove(path);
 }
 

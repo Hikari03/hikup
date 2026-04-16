@@ -34,11 +34,57 @@ void HTTPFileServer::_run ( const std::string& address ) const {
 	mg_mgr_free(&mgr);
 }
 
+std::string HTTPFileServer::createSymlinkFor( const std::filesystem::path & file ) {
+	auto fileName = file.filename().string();
+	fileName = fileName.substr(0, fileName.find('.'));
+	std::ranges::replace(fileName, '<', '.');
+	const auto dotPos = fileName.find_last_of('.');
+	if ( dotPos == std::string::npos )
+		fileName = ".noext";
+	else
+		fileName = fileName.substr(dotPos);
+
+	fileName = file.extension().string().substr(1) + fileName;
+
+	const auto linkPath = std::filesystem::current_path() / "links" / fileName;
+
+	if ( std::filesystem::exists(linkPath) )
+		return "file already exists, this shouldn't happen";
+
+	std::filesystem::create_symlink(file, linkPath);
+	return fileName;
+}
+
+void HTTPFileServer::removeSymlinkFor( const std::filesystem::path & file ) {
+	auto fileName = file.filename().string();
+	fileName = fileName.substr(0, fileName.find('.'));
+	std::ranges::replace(fileName, '<', '.');
+	const auto dotPos = fileName.find_last_of('.');
+	if ( dotPos == std::string::npos )
+		fileName = ".noext";
+	else
+		fileName = fileName.substr(dotPos);
+
+	fileName = file.extension().string().substr(1) + fileName;
+
+	const auto linkPath = std::filesystem::current_path() / "links" / fileName;
+
+	std::filesystem::remove(linkPath);
+}
+
 void HTTPFileServer::_generateSymLinks () {
 	for ( const auto& file: std::filesystem::directory_iterator("storage") ) {
 		auto fileName = file.path().filename().string();
 		fileName = fileName.substr(0, fileName.find('.'));
 		std::ranges::replace(fileName, '<', '.');
+		const auto dotPos = fileName.find_last_of('.');
+		if ( dotPos == std::string::npos )
+			fileName = ".noext";
+		else
+			fileName = fileName.substr(dotPos);
+
+		fileName = file.path().extension().string().substr(1) + fileName;
+
 		const auto linkPath = std::filesystem::current_path() / "links" / fileName;
 
 		if ( std::filesystem::exists(linkPath) )
@@ -77,10 +123,13 @@ void HTTPFileServer::_ev_handler ( mg_connection* c, const int ev, void* ev_data
 
 
 		// get hash from file name
-		auto filePath = "/" + Utils::FS::findCorrespondingFileName(request.substr(1)).value_or("<<<<INVALID>>>>");
-		filePath = filePath.substr(0, filePath.find('.'));
-		std::ranges::replace(filePath, '<', '.');
-
+		const auto hash = request.substr(1, request.find_last_of('.')-1);
+		auto fileName = Utils::FS::findCorrespondingFileName(hash).value_or("<<<<INVALID>>>>");
+		MG_INFO(( "File path2: %s", fileName.c_str() ));
+		fileName = fileName.substr(0, fileName.find('.'));
+		std::ranges::replace(fileName, '<', '.');
+		const auto filePath = "/" + hash + fileName.substr(fileName.find_last_of('.'));
+		MG_INFO(( "File path3: %s", filePath.c_str() ));
 
 		if ( !std::filesystem::exists(HTTPFileServerVars::_rootDir + filePath) ) {
 			mg_http_reply(c, 404, "", "File not found");
@@ -96,15 +145,14 @@ void HTTPFileServer::_ev_handler ( mg_connection* c, const int ev, void* ev_data
 		const auto path = HTTPFileServerVars::_rootDir + filePath;
 
 		if ( strcmp(buf, "yes") == 0 ) {
-			const auto header = "Content-Disposition: filename=\"" + filePath.substr(1) + "\"\r\n";
+			const auto header = "Content-Disposition: filename=\"" + fileName+ "\"\r\n";
 			opts.extra_headers = header.c_str();
 			MG_INFO(( "Serving file: %s", path.c_str() ));
 			mg_http_serve_file(c, hm, path.c_str(), &opts);
 			return;
 		}
 		if ( strcmp(buf, "no") == 0 ) {
-			const auto download_header = std::string("Content-Disposition: attachment; filename=\"") + filePath.
-			                             substr(1) + "\"\r\n";
+			const auto download_header = std::string("Content-Disposition: attachment; filename=\"") + fileName + "\"\r\n";
 			opts.extra_headers = download_header.c_str();
 			MG_INFO(( "Serving file: %s", path.c_str() ));
 			mg_http_serve_file(c, hm, path.c_str(), &opts);

@@ -18,8 +18,6 @@ FileTracker::FileTracker ( const std::filesystem::path& path )
 
 	if ( !out ) { throw std::runtime_error("FileTracker::add: Cannot open file for writing"); }
 
-	std::cout << root << std::endl;
-
 	out.close();
 }
 
