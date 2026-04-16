@@ -1,10 +1,12 @@
 #include "FileTracker.hpp"
 
+#include <iostream>
+
 #include "utils.hpp"
 
 FileTracker::FileTracker ( const std::filesystem::path& path )
 	: filePath(path) {
-	std::ofstream out(path, std::ios_base::ate); // touch the file
+	std::ofstream out(path, std::ios_base::app); // touch the file
 
 	try { root = toml::parse_file(path.string()); }
 	catch ( const toml::parse_error& err ) {
@@ -15,6 +17,8 @@ FileTracker::FileTracker ( const std::filesystem::path& path )
 	}
 
 	if ( !out ) { throw std::runtime_error("FileTracker::add: Cannot open file for writing"); }
+
+	std::cout << root << std::endl;
 
 	out.close();
 }
