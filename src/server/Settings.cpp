@@ -16,6 +16,7 @@ Settings::Settings ( const Settings& other ) {
     httpAddress = other.httpAddress;
     httpProtocol = other.httpProtocol;
     hostname = other.hostname;
+    httpDisplayInBrowser = other.httpDisplayInBrowser;
     syncTargets = other.syncTargets;
     syncPeriod = other.syncPeriod;
 }
@@ -48,6 +49,7 @@ Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
     if ( result.wantHttp ) {
         result.httpAddress = settings["server"]["httpAddress"].as_string()->value_or("http://0.0.0.0:6997");
         result.httpProtocol = settings["server"]["httpProtocol"].as_string()->value_or("http");
+        result.httpDisplayInBrowser = settings["server"]["httpDisplayInBrowser"].as_boolean()->value_or(false);
         result.authUser = settings["auth"]["user"].as_string()->value_or("admin");
         result.authPass = settings["auth"]["password"].as_string()->value_or("admin");
     }

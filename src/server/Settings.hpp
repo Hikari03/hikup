@@ -18,6 +18,8 @@ struct Settings {
     std::string httpAddress;
     std::string hostname;
     std::string httpProtocol;
+    bool httpDisplayInBrowser;
+
     std::vector<SyncTarget> syncTargets;
     int syncPeriod;
 

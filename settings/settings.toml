@@ -6,6 +6,7 @@ password = 'admin'
 wantHttpServer = true
 httpAddress = "http://0.0.0.0:6997" # bind address
 httpProtocol = "http" # external http or https, useful when behind reverse proxy
+httpDisplayInBrowser = true # if you want to default to '?view=yes' when this parameter is not specified in url
 hostname = "example.org" # external hostname only for printing http links
 
 [syncTargets]
