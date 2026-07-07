@@ -11,12 +11,17 @@ namespace HTTPFileServerVars { // ugly i know
 	inline std::string _rootDir;
 	inline std::string _authUser;
 	inline std::string _authPass;
+	inline std::string _httpDisplayInBrowser;
 }
 
 class HTTPFileServer {
 public:
-	HTTPFileServer ( bool& turnOff, std::string rootDir )
-		: _turnOff(turnOff) { HTTPFileServerVars::_rootDir = std::move(rootDir); }
+	HTTPFileServer ( bool& turnOff, std::string rootDir, const bool httpDisplayInBrowser )
+		:	_turnOff(turnOff)
+	{
+		HTTPFileServerVars::_rootDir = std::move(rootDir);
+		HTTPFileServerVars::_httpDisplayInBrowser = httpDisplayInBrowser ? "yes" : "no";
+	}
 
 	[[nodiscard]] std::thread run ( std::string authUser = "admin", std::string authPass = "admin", const std::string & address = "0.0.0.0:6997" );
 

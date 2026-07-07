@@ -139,7 +139,7 @@ void HTTPFileServer::_ev_handler ( mg_connection* c, const int ev, void* ev_data
 		char buf[4] = {0};
 		if ( mg_http_get_var(&hm->query, "view", buf, sizeof( buf )) <= 0 ) {
 			// Default to download if 'view' parameter is not present
-			strcpy(buf, "no");
+			strcpy(buf, HTTPFileServerVars::_httpDisplayInBrowser.c_str());
 		}
 
 		const auto path = HTTPFileServerVars::_rootDir + filePath;

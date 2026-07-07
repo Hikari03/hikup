@@ -80,7 +80,8 @@ int main () {
 	if ( settings.wantHttp ) {
 		HTTPFileServer httpFileServer(
 		turnOff,
-		std::filesystem::absolute(std::filesystem::current_path() / "links").string()
+		std::filesystem::absolute(std::filesystem::current_path() / "links").string(),
+		settings.httpDisplayInBrowser
 		);
 
 		httpThread = httpFileServer.run(settings.authUser, settings.authPass, settings.httpAddress);
