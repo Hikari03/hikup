@@ -25,6 +25,10 @@
 - `hikup rm <file> <server-address>`: Remove a file.
 - `hikup ls <user> <pass> <server-address>`: List all files (requires authentication).
 
+> [!NOTE]
+> When an operation with more files at once is desired, pipe space or new-line separated list of files/hashes into program and in arguments enter `-` in the normal place.
+> For example: `echo "file1 file2" | hikup up - hikup.example.org`
+
 ## Dependencies
 ### Shared
 - `cmake`, `libsodium`, `g++` with c++23 support
