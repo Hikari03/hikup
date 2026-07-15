@@ -46,6 +46,12 @@ void ConnectionHandler::_serveConnection ( ClientInfo client ) {
 			_handleListFiles(connection);
 		else if ( message == "command:SYNC" )
 			_syncAsSlave(connection);
+		else if ( message == "command:BATCH_UPLOAD")
+			_handleBatchReceiveFile(connection);
+		else if ( message == "command:BATCH_DOWNLOAD")
+			_handleBatchSendFile(connection);
+		else if ( message == "command:BATCH_REMOVE")
+			_handleBatchRemoveFile(connection);
 	}
 	catch ( const std::exception& e ) {
 		Utils::elog("ConnectionHandler: error serving client: " + std::string(e.what()));
@@ -319,6 +325,31 @@ void ConnectionHandler::_handleListFiles ( ConnectionServer& connection ) const 
 
 	connection.sendInternal("DONE");
 }
+
+void ConnectionHandler::_handleBatchReceiveFile ( ConnectionServer& connection ) {
+	auto len = std::stoi(connection.receiveInternal().substr(strlen("length:")));
+
+	while (len--) {
+		_handleReceiveFile(connection);
+	}
+}
+
+void ConnectionHandler::_handleBatchSendFile ( ConnectionServer& connection ) {
+	auto len = std::stoi(connection.receiveInternal().substr(strlen("length:")));
+
+	while (len--) {
+		_handleSendFile(connection);
+	}
+}
+
+void ConnectionHandler::_handleBatchRemoveFile ( ConnectionServer& connection ) {
+	auto len = std::stoi(connection.receiveInternal().substr(strlen("length:")));
+
+	while (len--) {
+		_handleRemoveFile(connection);
+	}
+}
+
 
 template < ConnType T >
 void ConnectionHandler::_sendFileInSync ( T& connection, const std::string& fileName ) {

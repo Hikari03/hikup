@@ -19,12 +19,17 @@ add_executable(hikup src/client/main.cpp
         src/shared/Connection.cpp
         src/client/util.cpp
         src/client/CommandType.cpp
-        src/client/Color.cpp
+        src/client/Color.hpp
         src/shared/FileInfo.cpp
         src/shared/FileInfo.hpp
         src/shared/utils.cpp
         src/shared/utils.cpp
-        src/shared/utils.hpp)
+        src/shared/utils.hpp
+        src/client/BatchHandlers.hpp
+        src/client/BatchHandlers.cpp
+        src/client/CommandHandlers.cpp
+        src/client/CommandHandlers.hpp
+        src/client/CommandType.hpp)
 
 add_executable(hikup-server src/server/main.cpp
         src/server/terminal.cpp

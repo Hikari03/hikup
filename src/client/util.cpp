@@ -3,8 +3,9 @@
 #include <iostream>
 #include <sodium.h>
 #include <string>
+#include <vector>
 
-#include "Color.cpp"
+#include "Color.hpp"
 #include "../shared/utils.hpp"
 
 /**
@@ -53,7 +54,6 @@ inline std::string colorize ( const std::string& text, Color color ) {
 }
 
 
-
 inline std::string computeHash ( std::ifstream& file, const size_t allocationSpace, const size_t fileSize ) {
 	file.seekg(0);
 	const auto buffer = std::make_unique<char[]>(allocationSpace);
@@ -69,8 +69,7 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 
 
 		// Update hash with the bytes read
-		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(buffer.get()),
-		                          file.gcount());
+		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(buffer.get()), file.gcount());
 
 
 		if ( file.eof() )
@@ -78,15 +77,15 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 		if ( file.fail() )
 			throw std::runtime_error("Error reading file.");
 
-		std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) +
-				colorize(humanReadableSize(static_cast<size_t>(file.tellg())) + '/'+ humanReadableSize(fileSize) + "         ", Color::CYAN) << std::flush;
-
+		std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) + colorize(
+			humanReadableSize(static_cast<size_t>(file.tellg())) + '/' + humanReadableSize(fileSize) + "         ",
+			Color::CYAN) << std::flush;
 	}
 
 	crypto_generichash_final(&state, hash, sizeof hash);
 
-	std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) +
-				colorize(humanReadableSize(fileSize) + '/'+ humanReadableSize(fileSize), Color::CYAN) << std::endl;
+	std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) + colorize(
+		humanReadableSize(fileSize) + '/' + humanReadableSize(fileSize), Color::CYAN) << std::endl;
 
 	file.clear();
 	file.seekg(0);
@@ -94,4 +93,22 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 	return binToHex(hash, sizeof hash);
 }
 
+inline std::vector<std::string> cutStringIntoVector(std::string_view str) {
+    std::vector<std::string> ret;
+    size_t start = 0;
+    size_t end = str.find_first_of(" \n");
 
+    while (end != std::string_view::npos) {
+        if (end != start) {
+            ret.emplace_back(str.substr(start, end - start));
+        }
+        start = end + 1;
+        end = str.find_first_of(" \n", start);
+    }
+
+    if (start < str.size()) {
+        ret.emplace_back(str.substr(start));
+    }
+
+    return ret;
+}

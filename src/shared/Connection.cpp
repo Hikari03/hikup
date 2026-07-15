@@ -320,6 +320,10 @@ std::string Connection::receiveData () {
 	return message.substr(strlen(_data));
 }
 
+bool Connection::isConnected () const {
+	return _encrypted;
+}
+
 void Connection::resizeBuffer ( const unsigned long newSize )  {
 	_buffer = std::make_unique<char[]>(newSize);
 	_bufferSize = newSize;
@@ -342,7 +346,7 @@ Connection::~Connection () {
 		close();
 }
 
-void Connection::clearBuffer () const { memset(_buffer.get(), '\0', _sizeOfPreviousMessage); }
+void Connection::clearBuffer () const { memset(_buffer.get(), '\0', _bufferSize); }
 
 std::vector<std::string> Connection::dnsLookup ( const std::string& domain, int ipv ) {
 	// credit to http://www.zedwood.com/article/cpp-dns-lookup-ipv4-and-ipv6
