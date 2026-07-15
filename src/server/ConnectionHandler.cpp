@@ -163,7 +163,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
 	connection.sendInternal(hashString);
 	connection.sendInternal(std::to_string(_settings.wantHttp));
-	if ( _settings.wantHttp )
+	if ( _settings.wantHttp && connection.receiveInternal() == "getHttpLink" )
 		connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + HTTPLinkString);
 }
 
