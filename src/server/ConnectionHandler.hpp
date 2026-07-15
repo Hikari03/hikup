@@ -52,6 +52,12 @@ private:
 
     void _handleListFiles ( ConnectionServer& connection ) const;
 
+    void _handleBatchReceiveFile ( ConnectionServer& connection );
+
+	void _handleBatchSendFile ( ConnectionServer& connection );
+
+	void _handleBatchRemoveFile ( ConnectionServer& connection );
+
     // internal
 
     template < ConnType T >

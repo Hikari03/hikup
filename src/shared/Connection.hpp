@@ -65,6 +65,8 @@ public:
 
 	std::string receiveData ();
 
+	bool isConnected () const;
+
 	void resizeBuffer ( unsigned long newSize );
 
 	void close ();
