@@ -11,7 +11,8 @@ void printHelp ( const std::string& argv0 ) {
                 "which you need to input if you want to download it.\n\n"
                 "For ls command, provide username and password (from server settings).\n\n"
                 "If server has HTTP server, you will get link for download.\n"
-                "You can append '?view=yes' to the link to view the file in browser." << std::endl;
+                "You can append '?view=yes' to the link to view the file in browser.\n\n"
+                "You can also replace the file/hash with `-` and pass space/new-line separated list to standard input" << std::endl;
 }
 
 int start ( int argc, char* argv[] ) {
