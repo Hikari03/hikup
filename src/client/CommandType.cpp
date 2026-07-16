@@ -1,12 +1,10 @@
 #include "CommandType.hpp"
 
-#include <stdexcept>
+#include <iostream>
 #include <string>
 #include <utility>
 
 namespace Command {
-
-
 
 	std::string toString ( const Type command ) {
 		switch ( command ) {
@@ -20,12 +18,8 @@ namespace Command {
 				return "LIST";
 			case Type::BATCH:
 				return "BATCH";
-			case Type::BATCH_UPLOAD:
-				return "BATCH_UPLOAD";
-			case Type::BATCH_DOWNLOAD:
-				return "BATCH_DOWNLOAD";
-			case Type::BATCH_REMOVE:
-				return "BATCH_REMOVE";
+			case Type::QUIET:
+				return "QUIET";
 			case Type::INVALID:
 				return "INVALID";
 			default: // cannot happen
@@ -33,36 +27,61 @@ namespace Command {
 		}
 	}
 
-	Type resolveCommand ( const std::string& command ) {
-		if ( command == "up" )
+	Type selectBasic ( const std::set<Type>& commands ) {
+		if ( commands.contains(Type::UPLOAD) )
 			return Type::UPLOAD;
-		if ( command == "down" )
+
+		if ( commands.contains(Type::DOWNLOAD) )
 			return Type::DOWNLOAD;
-		if ( command == "ls" )
-			return Type::LIST;
-		if ( command == "rm" )
+
+		if ( commands.contains(Type::REMOVE) )
 			return Type::REMOVE;
+
+		if ( commands.contains(Type::LIST) )
+			return Type::LIST;
 
 		return Type::INVALID;
 	}
 
-	Type operator+ (Type one, Type two) {
-		if ( one != Type::BATCH && two != Type::BATCH)
-			return Type::INVALID;
+	bool isValid ( const std::set<Type>& commands ) {
+		if ( commands.contains(Type::INVALID) )
+			return false;
 
-		if ( two == Type::BATCH )
-			std::swap(one, two);
+		return true;
+	}
 
-		if ( two == Type::UPLOAD )
-			return Type::BATCH_UPLOAD;
+	std::set<Type> resolveCommand ( std::string command ) {
 
-		if ( two == Type::DOWNLOAD)
-			return Type::BATCH_DOWNLOAD;
+		std::set<Type> res;
 
-		if ( two == Type::REMOVE )
-			return Type::BATCH_REMOVE;
+		size_t pos;
 
-		return Type::INVALID;
+		if ( pos = command.find("up"); pos != std::string::npos ) {
+			command.erase(pos, 2);
+			res.emplace(Type::UPLOAD);
+		}
+		else if ( pos = command.find("down"); pos != std::string::npos ) {
+			command.erase(pos, 4);
+			res.emplace(Type::DOWNLOAD);
+		}
+		else if ( pos = command.find("ls"); pos != std::string::npos ) {
+			command.erase(pos, 2);
+			res.emplace(Type::LIST);
+		}
+		else if ( pos = command.find("rm"); pos != std::string::npos ) {
+			command.erase(pos, 2);
+			res.emplace(Type::REMOVE);
+		}
+
+		if ( pos = command.find('q'); pos != std::string::npos ) {
+			command.erase(pos, 1);
+			res.emplace(Type::QUIET);
+		}
+
+		if ( res.empty() || !command.empty() )
+			return {Type::INVALID};
+
+		return res;
 	}
 }
 

@@ -24,6 +24,7 @@
 - `hikup down <file> <server-address>`: Download a file.
 - `hikup rm <file> <server-address>`: Remove a file.
 - `hikup ls <user> <pass> <server-address>`: List all files (requires authentication).
+- add `q` into first argument for quiet run: like qup, qdown, ...
 
 > [!NOTE]
 > When an operation with more files at once is desired, pipe space or new-line separated list of files/hashes into program and in arguments enter `-` in the normal place.
@@ -58,7 +59,7 @@ cmake --build build --target hikup -j $(nproc)
 ### Sync
 - Sync files between servers in declared periods.
 - To use this, add target in settings in `[syncTargets]` section.
-- 
+
 > [!WARNING]
 >**The declared target will be the master in one case**: if you uploaded a removed file and that removal synced. Which means if you again upload this file on non-master, your master will remove it on the next sync.
 

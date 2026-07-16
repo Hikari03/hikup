@@ -1,4 +1,5 @@
 #include <iostream>
+#include <set>
 
 #include "BatchHandlers.hpp"
 #include "CommandHandlers.hpp"
@@ -6,13 +7,14 @@
 #include "../shared/Connection.hpp"
 
 void printHelp ( const std::string& argv0 ) {
-    std::cout << "Usage: " << argv0 << " <up <file> | down <hash> | rm <hash> | ls <user> <pass>> <server> \n\n"
+    std::cout << "Usage: " << argv0 << " [q]<up <file> | down <hash> | rm <hash> | ls <user> <pass>> <server> \n\n"
                 "If file is successfully uploaded, you will get file hash\n"
                 "which you need to input if you want to download it.\n\n"
                 "For ls command, provide username and password (from server settings).\n\n"
                 "If server has HTTP server, you will get link for download.\n"
                 "You can append '?view=yes' to the link to view the file in browser.\n\n"
-                "You can also replace the file/hash with `-` and pass space/new-line separated list to standard input" << std::endl;
+                "You can also replace the file/hash with `-` and pass space/new-line separated list to standard input\n\n"
+                "add `q` into argument with up, down, rm for silent run. i.e. qup" << std::endl;
 }
 
 int start ( int argc, char* argv[] ) {
@@ -23,12 +25,17 @@ int start ( int argc, char* argv[] ) {
 
     auto command = Command::resolveCommand(argv[1]);
 
-    if ( command == Command::Type::INVALID ) {
+    const auto quiet = command.contains(Command::Type::QUIET);
+
+    if ( !strcmp(argv[2], "-") )
+        command.emplace(Command::Type::BATCH);
+
+    if ( !Command::isValid(command) ) {
         std::cerr << colorize("Invalid command", Color::RED) << std::endl;
         return 1;
     }
 
-    if ( command == Command::Type::LIST && argc != 5 ) {
+    if ( command.contains(Command::Type::LIST) && argc != 5 ) {
         std::cerr << colorize("Invalid number of arguments for list command", Color::RED) << std::endl;
         printHelp(argv[0]);
         return 1;
@@ -42,28 +49,26 @@ int start ( int argc, char* argv[] ) {
     std::string serverAddr;
 
 
-    if ( (command == Command::Type::UPLOAD ||
-         command == Command::Type::REMOVE ||
-         command == Command::Type::DOWNLOAD) &&
-         !strcmp(argv[2], "-")) {
-
-        command = command + Command::Type::BATCH;
+    if ( (command.contains(Command::Type::UPLOAD) ||
+         command.contains(Command::Type::REMOVE) ||
+         command.contains(Command::Type::DOWNLOAD)) &&
+         command.contains(Command::Type::BATCH)) {
 
         std::string fileString, tmp;
 
         while ( !std::cin.eof() ) {
             std::getline(std::cin, tmp);
-            fileString += tmp;
+            fileString += tmp + ' ';
         }
 
         auto files = cutStringIntoVector(fileString);
 
         connection.connectToServer(argv[3], 6998);
 
-        return Batch::autoResolve(command, connection, files);
+        return Batch::autoResolve(command, connection, files, quiet);
     }
 
-    if ( command == Command::Type::LIST ) {
+    if ( command.contains(Command::Type::LIST) ) {
         serverAddr = argv[4];
     }
     else {
@@ -71,7 +76,7 @@ int start ( int argc, char* argv[] ) {
     }
 
     try {
-        if ( command == Command::Type::UPLOAD ) {
+        if ( command.contains(Command::Type::UPLOAD) ) {
             auto [_file, _fileSize, _fileName] = resolveFile(argv[2]);
             file = std::move(_file);
             fileSize = _fileSize;
@@ -84,31 +89,39 @@ int start ( int argc, char* argv[] ) {
                 toAllocate = std::min(freeMem, static_cast<unsigned long>(fileSize));
 
 
-            std::cout << colorize("Computing hash by chunks of size: ", Color::GREEN) << colorize(
-                humanReadableSize(toAllocate), Color::CYAN
-            ) << std::endl;
-            hash = computeHash(file, toAllocate, fileSize);
-            std::cout << colorize("Hash computed", Color::GREEN) << std::endl;
+            if ( !quiet ) {
+                std::cout << colorize("Computing hash by chunks of size: ", Color::GREEN) << colorize(
+                    humanReadableSize(toAllocate), Color::CYAN
+                ) << std::endl;
+            }
+            hash = computeHash(file, toAllocate, fileSize, quiet);
+            if ( !quiet ) {
+                std::cout << colorize("Hash computed", Color::GREEN) << std::endl;
+            }
         }
 
-        std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
+        if ( !quiet ) {
+            std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
+        }
 
         connection.connectToServer(serverAddr, 6998);
 
-        std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
+        if ( !quiet ) {
+            std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
+        }
     }
     catch ( std::runtime_error& e ) {
         std::cerr << colorize(e.what(), Color::RED) << std::endl;
         return 1;
     }
 
-    connection.sendInternal("command:" + Command::toString(command));
-    if ( command == Command::Type::UPLOAD ) {
+    connection.sendInternal("command:" + Command::toString(Command::selectBasic(command)));
+    if ( command.contains(Command::Type::UPLOAD) ) {
         connection.sendInternal("size:" + std::to_string(fileSize));
         connection.sendInternal("filename:" + fileName);
         connection.sendInternal("hash:" + hash);
     }
-    else if ( command == Command::Type::DOWNLOAD || command == Command::Type::REMOVE ) {
+    else if ( command.contains(Command::Type::DOWNLOAD) || command.contains(Command::Type::REMOVE) ) {
         fileName = argv[2];
         connection.sendInternal("hash:" + fileName);
     }
@@ -116,30 +129,43 @@ int start ( int argc, char* argv[] ) {
     if ( const auto reason = connection.receiveInternal(); reason != "OK" ) {
         std::cerr << colorize("Server did not accept the request\n", Color::RED);
 
-        if ( command == Command::Type::UPLOAD ) {
-            std::cout << colorize("Reason: " + reason + '\n', Color::RED) << colorize("Hash: ", Color::PURPLE) <<
+        if ( command.contains(Command::Type::UPLOAD) ) {
+            std::cerr << colorize("Reason: " + reason + '\n', Color::RED) << colorize("Hash: ", Color::PURPLE) <<
                     colorize(hash, Color::CYAN) << std::endl;
             const auto httpLink = connection.receiveInternal();
-            std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink, Color::CYAN) << std::endl;
+            if ( !quiet ) {
+                std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink + fileName.substr(fileName.find_last_of('.')), Color::CYAN) << std::endl;
+            } else {
+                std::cout << httpLink << fileName.substr(fileName.find_last_of('.')) << '\n';
+            }
         }
 
-        else { std::cout << colorize("Reason: " + reason, Color::RED) << std::endl; }
+
+        else {
+            if ( !quiet ) {
+                std::cout << colorize("Reason: " + reason, Color::RED) << std::endl;
+            }
+        }
         return 1;
     }
 
-    if ( command == Command::Type::REMOVE ) {
-        std::cout << colorize("File with hash ", Color::GREEN) << colorize(fileName, Color::CYAN) << colorize(
-            " removed!", Color::RED
-        ) << std::endl;
+    if ( command.contains(Command::Type::REMOVE) ) {
+        if ( !quiet ) {
+            std::cout << colorize("File with hash ", Color::GREEN) << colorize(fileName, Color::CYAN) << colorize(
+                " removed!", Color::RED
+            ) << std::endl;
+        }
         return 0;
     }
-    std::cout << colorize("Server ready!\n", Color::GREEN) << std::endl;
+    if ( !quiet ) {
+        std::cout << colorize("Server ready!\n", Color::GREEN) << std::endl;
+    }
 
-    if ( command == Command::Type::UPLOAD )
-        CommandHandlers::sendFile(file, fileSize, connection);
-    else if ( command == Command::Type::DOWNLOAD )
-        CommandHandlers::downloadFile(connection);
-    else if ( command == Command::Type::LIST ) {
+    if ( command.contains(Command::Type::UPLOAD) )
+        CommandHandlers::sendFile(file, fileSize, connection, quiet);
+    else if ( command.contains(Command::Type::DOWNLOAD) )
+        CommandHandlers::downloadFile(connection, quiet);
+    else if ( command.contains(Command::Type::LIST) ) {
         return CommandHandlers::listFiles(connection, argv[2], argv[3]);
     }
 

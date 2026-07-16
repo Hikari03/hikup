@@ -54,7 +54,7 @@ inline std::string colorize ( const std::string& text, Color color ) {
 }
 
 
-inline std::string computeHash ( std::ifstream& file, const size_t allocationSpace, const size_t fileSize ) {
+inline std::string computeHash ( std::ifstream& file, const size_t allocationSpace, const size_t fileSize, bool quiet = false ) {
 	file.seekg(0);
 	const auto buffer = std::make_unique<char[]>(allocationSpace);
 	unsigned char hash[crypto_generichash_BYTES];
@@ -77,15 +77,19 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 		if ( file.fail() )
 			throw std::runtime_error("Error reading file.");
 
-		std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) + colorize(
-			humanReadableSize(static_cast<size_t>(file.tellg())) + '/' + humanReadableSize(fileSize) + "         ",
-			Color::CYAN) << std::flush;
+		if ( !quiet ) {
+			std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) + colorize(
+				humanReadableSize(static_cast<size_t>(file.tellg())) + '/' + humanReadableSize(fileSize) + "         ",
+				Color::CYAN) << std::flush;
+		}
 	}
 
 	crypto_generichash_final(&state, hash, sizeof hash);
 
-	std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) + colorize(
-		humanReadableSize(fileSize) + '/' + humanReadableSize(fileSize), Color::CYAN) << std::endl;
+	if ( !quiet ) {
+		std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) + colorize(
+			humanReadableSize(fileSize) + '/' + humanReadableSize(fileSize), Color::CYAN) << std::endl;
+	}
 
 	file.clear();
 	file.seekg(0);
@@ -96,14 +100,18 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 inline std::vector<std::string> cutStringIntoVector(std::string_view str) {
     std::vector<std::string> ret;
     size_t start = 0;
-    size_t end = str.find_first_of(" \n");
+    size_t end = str.find_first_of(" \n\t");
 
     while (end != std::string_view::npos) {
         if (end != start) {
             ret.emplace_back(str.substr(start, end - start));
         }
         start = end + 1;
-        end = str.find_first_of(" \n", start);
+
+    	while ( ::isspace(*str.begin()) )
+    		start++;
+
+        end = str.find_first_of(" \n\t", start);
     }
 
     if (start < str.size()) {
