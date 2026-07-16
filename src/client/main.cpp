@@ -24,6 +24,8 @@ int start ( int argc, char* argv[] ) {
 
     auto command = Command::resolveCommand(argv[1]);
 
+    const auto quiet = command.contains(Command::Type::QUIET);
+
     if ( !strcmp(argv[2], "-") )
         command.emplace(Command::Type::BATCH);
 
@@ -55,14 +57,14 @@ int start ( int argc, char* argv[] ) {
 
         while ( !std::cin.eof() ) {
             std::getline(std::cin, tmp);
-            fileString += tmp;
+            fileString += tmp + ' ';
         }
 
         auto files = cutStringIntoVector(fileString);
 
         connection.connectToServer(argv[3], 6998);
 
-        return Batch::autoResolve(command, connection, files);
+        return Batch::autoResolve(command, connection, files, quiet);
     }
 
     if ( command.contains(Command::Type::LIST) ) {
@@ -86,18 +88,26 @@ int start ( int argc, char* argv[] ) {
                 toAllocate = std::min(freeMem, static_cast<unsigned long>(fileSize));
 
 
-            std::cout << colorize("Computing hash by chunks of size: ", Color::GREEN) << colorize(
-                humanReadableSize(toAllocate), Color::CYAN
-            ) << std::endl;
-            hash = computeHash(file, toAllocate, fileSize);
-            std::cout << colorize("Hash computed", Color::GREEN) << std::endl;
+            if ( !quiet ) {
+                std::cout << colorize("Computing hash by chunks of size: ", Color::GREEN) << colorize(
+                    humanReadableSize(toAllocate), Color::CYAN
+                ) << std::endl;
+            }
+            hash = computeHash(file, toAllocate, fileSize, quiet);
+            if ( !quiet ) {
+                std::cout << colorize("Hash computed", Color::GREEN) << std::endl;
+            }
         }
 
-        std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
+        if ( !quiet ) {
+            std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
+        }
 
         connection.connectToServer(serverAddr, 6998);
 
-        std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
+        if ( !quiet ) {
+            std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
+        }
     }
     catch ( std::runtime_error& e ) {
         std::cerr << colorize(e.what(), Color::RED) << std::endl;
@@ -119,28 +129,41 @@ int start ( int argc, char* argv[] ) {
         std::cerr << colorize("Server did not accept the request\n", Color::RED);
 
         if ( command.contains(Command::Type::UPLOAD) ) {
-            std::cout << colorize("Reason: " + reason + '\n', Color::RED) << colorize("Hash: ", Color::PURPLE) <<
+            std::cerr << colorize("Reason: " + reason + '\n', Color::RED) << colorize("Hash: ", Color::PURPLE) <<
                     colorize(hash, Color::CYAN) << std::endl;
             const auto httpLink = connection.receiveInternal();
-            std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink, Color::CYAN) << std::endl;
+            if ( !quiet ) {
+                std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink + fileName.substr(fileName.find_last_of('.')), Color::CYAN) << std::endl;
+            } else {
+                std::cout << httpLink << fileName.substr(fileName.find_last_of('.')) << '\n';
+            }
         }
 
-        else { std::cout << colorize("Reason: " + reason, Color::RED) << std::endl; }
+
+        else {
+            if ( !quiet ) {
+                std::cout << colorize("Reason: " + reason, Color::RED) << std::endl;
+            }
+        }
         return 1;
     }
 
     if ( command.contains(Command::Type::REMOVE) ) {
-        std::cout << colorize("File with hash ", Color::GREEN) << colorize(fileName, Color::CYAN) << colorize(
-            " removed!", Color::RED
-        ) << std::endl;
+        if ( !quiet ) {
+            std::cout << colorize("File with hash ", Color::GREEN) << colorize(fileName, Color::CYAN) << colorize(
+                " removed!", Color::RED
+            ) << std::endl;
+        }
         return 0;
     }
-    std::cout << colorize("Server ready!\n", Color::GREEN) << std::endl;
+    if ( !quiet ) {
+        std::cout << colorize("Server ready!\n", Color::GREEN) << std::endl;
+    }
 
     if ( command.contains(Command::Type::UPLOAD) )
-        CommandHandlers::sendFile(file, fileSize, connection);
+        CommandHandlers::sendFile(file, fileSize, connection, quiet);
     else if ( command.contains(Command::Type::DOWNLOAD) )
-        CommandHandlers::downloadFile(connection);
+        CommandHandlers::downloadFile(connection, quiet);
     else if ( command.contains(Command::Type::LIST) ) {
         return CommandHandlers::listFiles(connection, argv[2], argv[3]);
     }

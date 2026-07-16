@@ -4,7 +4,7 @@
 #include "util.cpp"
 #include "../shared/FileInfo.hpp"
 
-void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection ) {
+void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection, const bool quiet ) {
     if ( !file.good() ) {
         std::cerr << colorize("Could not open file", Color::RED) << std::endl;
         return;
@@ -22,9 +22,11 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
     unsigned long long sizeRead = 0;
     unsigned long long sizeUploaded = 0;
 
-    std::cout << colorize("Starting upload of size: ", Color::BLUE) << colorize(
-        humanReadableSize(fileSize), Color::CYAN
-    ) << "\n" << std::endl;
+    if ( !quiet ) {
+        std::cout << colorize("Starting upload of size: ", Color::BLUE) << colorize(
+            humanReadableSize(fileSize), Color::CYAN
+        ) << "\n" << std::endl;
+    }
 
     while ( true ) {
         const auto startReadTime = std::chrono::high_resolution_clock::now();
@@ -66,15 +68,17 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
                 + colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " + "| DEBUG | chunk size: " +
                 humanReadableSize(chunkSize) << std::flush;
 #else
-        std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
-                colorize(humanReadableSize(sizeUploaded), Color::CYAN) + colorize("/", Color::BLUE) +
-                colorize(humanReadableSize(fileSize), Color::CYAN) + colorize(
-                    std::string(" (") +
-                    std::to_string(( static_cast<double>(sizeUploaded) / static_cast<double>(fileSize) ) * 100.0).
-                    substr(0, 5) + " %)",
-                    Color::PURPLE
-                ) + " ┃ " + colorize("Read: " + humanReadableSpeed(readSpeed), Color::LL_BLUE) + " ━━ "
-                + colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
+        if ( !quiet ) {
+            std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
+                    colorize(humanReadableSize(sizeUploaded), Color::CYAN) + colorize("/", Color::BLUE) +
+                    colorize(humanReadableSize(fileSize), Color::CYAN) + colorize(
+                        std::string(" (") +
+                        std::to_string(( static_cast<double>(sizeUploaded) / static_cast<double>(fileSize) ) * 100.0).
+                        substr(0, 5) + " %)",
+                        Color::PURPLE
+                    ) + " ┃ " + colorize("Read: " + humanReadableSpeed(readSpeed), Color::LL_BLUE) + " ━━ "
+                    + colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
+        }
 #endif
 
 
@@ -114,19 +118,21 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
             ) + colorize(" (100 %)  ", Color::PURPLE) + "| DEBUG | chunk size: " + humanReadableSize(chunkSize) <<
             std::endl;
 #else
-    std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
-            colorize(humanReadableSize(sizeUploaded), Color::CYAN) + colorize(
-                "/", Color::BLUE
-            ) + colorize(
-                humanReadableSize(sizeUploaded),
-                Color::CYAN
-            ) + colorize(" (100 %)  ", Color::PURPLE) << std::endl;
+    if ( !quiet ) {
+        std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
+                colorize(humanReadableSize(sizeUploaded), Color::CYAN) + colorize(
+                    "/", Color::BLUE
+                ) + colorize(
+                    humanReadableSize(sizeUploaded),
+                    Color::CYAN
+                ) + colorize(" (100 %)  ", Color::PURPLE) << std::endl;
+    }
 #endif
 
     connection.sendInternal("DONE");
     if ( const auto confirmation = connection.receiveInternal();
         confirmation != "OK") {
-        std::cout << colorize("Upload failed with response: " + confirmation, Color::RED);
+        std::cerr << colorize("Upload failed with response: " + confirmation, Color::RED);
         return;
     }
 
@@ -134,18 +140,30 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
     const auto hash = connection.receiveInternal();
     const bool httpExists = std::stoi(connection.receiveInternal());
 
-    std::cout << colorize("File uploaded successfully with hash: ", Color::GREEN) + colorize(hash, Color::CYAN) <<
-            std::endl;
+    if ( !quiet ) {
+        std::cout << colorize("File uploaded successfully with hash: ", Color::GREEN) + colorize(hash, Color::CYAN) <<
+                std::endl;
+    } else {
+        std::cout << "hash: " << hash << '\n';
+    }
 
     if ( httpExists == true ) {
         connection.sendInternal("getHttpLink");
         const auto httpLink = connection.receiveInternal();
-        std::cout << colorize("HTTP link: ", Color::GREEN) + colorize(httpLink, Color::CYAN) << std::endl;
+        if ( !quiet ) {
+            std::cout << colorize("HTTP link: ", Color::GREEN) + colorize(httpLink, Color::CYAN) << std::endl;
+        } else {
+            std::cout << "http: " << httpLink << "\n\n";
+        }
     }
-    else { std::cout << colorize("HTTP link: ", Color::GREEN) + colorize("not available", Color::CYAN) << std::endl; }
+    else {
+        if ( !quiet ) {
+            std::cout << colorize("HTTP link: ", Color::GREEN) + colorize("not available", Color::CYAN) << std::endl;
+        }
+    }
 }
 
-void CommandHandlers::downloadFile ( Connection& connection ) {
+void CommandHandlers::downloadFile ( Connection& connection, const bool quiet ) {
     auto fileSize = std::stoll(connection.receiveInternal());
     auto fileName = connection.receiveInternal();
     double totalTimeDownload = 0.0, totalTimeWrite = 0.0;
@@ -157,10 +175,11 @@ void CommandHandlers::downloadFile ( Connection& connection ) {
     long long sizeWritten = 0;
     unsigned long long sizeDownloaded = 0;
 
-
-    std::cout << colorize("Downloading file: ", Color::BLUE) + colorize(fileName, Color::CYAN) << colorize(
-        " of size: ", Color::BLUE
-    ) << colorize(humanReadableSize(fileSize), Color::CYAN) << std::endl;
+    if ( !quiet ) {
+        std::cout << colorize("Downloading file: ", Color::BLUE) + colorize(fileName, Color::CYAN) << colorize(
+            " of size: ", Color::BLUE
+        ) << colorize(humanReadableSize(fileSize), Color::CYAN) << std::endl;
+    }
 
     // create file
     std::ofstream file(fileName, std::ios::binary);
@@ -189,18 +208,22 @@ void CommandHandlers::downloadFile ( Connection& connection ) {
 
         connection.sendInternal("confirm");
 
-        std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) <<
-                colorize(humanReadableSize(sizeWritten), Color::CYAN) << colorize("/", Color::BLUE) <<
-                colorize(humanReadableSize(fileSize), Color::CYAN) << colorize(
-                    std::string(" (") +
-                    std::to_string(( static_cast<double>(sizeWritten) / static_cast<double>(fileSize) ) * 100.0).
-                    substr(0, 5) + " %)",
-                    Color::PURPLE
-                ) << " ┃ " << colorize("Write: " + humanReadableSpeed(writeSpeed), Color::LL_BLUE) <<
-                " ━━ " + colorize("Down: " + humanReadableSpeed(downloadSpeed), Color::GREEN) << "  " << std::flush;
+        if ( !quiet ) {
+            std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) <<
+                    colorize(humanReadableSize(sizeWritten), Color::CYAN) << colorize("/", Color::BLUE) <<
+                    colorize(humanReadableSize(fileSize), Color::CYAN) << colorize(
+                        std::string(" (") +
+                        std::to_string(( static_cast<double>(sizeWritten) / static_cast<double>(fileSize) ) * 100.0).
+                        substr(0, 5) + " %)",
+                        Color::PURPLE
+                    ) << " ┃ " << colorize("Write: " + humanReadableSpeed(writeSpeed), Color::LL_BLUE) <<
+                    " ━━ " + colorize("Down: " + humanReadableSpeed(downloadSpeed), Color::GREEN) << "  " << std::flush;
+        }
     }
 
-    std::cout << std::endl;
+    if ( !quiet ) {
+        std::cout << std::endl;
+    }
 }
 
 int CommandHandlers::listFiles ( Connection& connection, const std::string& user, const std::string& pass ) {

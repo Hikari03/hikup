@@ -1,5 +1,6 @@
 #include "CommandType.hpp"
 
+#include <iostream>
 #include <string>
 #include <utility>
 
@@ -44,9 +45,9 @@ namespace Command {
 
 	bool isValid ( const std::set<Type>& commands ) {
 		if ( commands.contains(Type::INVALID) )
-			return true;
+			return false;
 
-		return false;
+		return true;
 	}
 
 	std::set<Type> resolveCommand ( std::string command ) {
