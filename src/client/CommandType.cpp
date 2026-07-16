@@ -17,6 +17,8 @@ namespace Command {
 				return "LIST";
 			case Type::BATCH:
 				return "BATCH";
+			case Type::QUIET:
+				return "QUIET";
 			case Type::INVALID:
 				return "INVALID";
 			default: // cannot happen
@@ -47,17 +49,38 @@ namespace Command {
 		return false;
 	}
 
-	Type resolveCommand ( const std::string& command ) {
-		if ( command == "up" )
-			return Type::UPLOAD;
-		if ( command == "down" )
-			return Type::DOWNLOAD;
-		if ( command == "ls" )
-			return Type::LIST;
-		if ( command == "rm" )
-			return Type::REMOVE;
+	std::set<Type> resolveCommand ( std::string command ) {
 
-		return Type::INVALID;
+		std::set<Type> res;
+
+		size_t pos;
+
+		if ( pos = command.find("up"); pos != std::string::npos ) {
+			command.erase(pos, 2);
+			res.emplace(Type::UPLOAD);
+		}
+		else if ( pos = command.find("down"); pos != std::string::npos ) {
+			command.erase(pos, 4);
+			res.emplace(Type::DOWNLOAD);
+		}
+		else if ( pos = command.find("ls"); pos != std::string::npos ) {
+			command.erase(pos, 2);
+			res.emplace(Type::LIST);
+		}
+		else if ( pos = command.find("rm"); pos != std::string::npos ) {
+			command.erase(pos, 2);
+			res.emplace(Type::REMOVE);
+		}
+
+		if ( pos = command.find('q'); pos != std::string::npos ) {
+			command.erase(pos, 1);
+			res.emplace(Type::QUIET);
+		}
+
+		if ( res.empty() || !command.empty() )
+			return {Type::INVALID};
+
+		return res;
 	}
 }
 

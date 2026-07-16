@@ -11,11 +11,12 @@ namespace Command {
 		REMOVE,
 		LIST,
 		BATCH,
+		QUIET,
 		INVALID
 	};
 
 	std::string toString ( const Type command );
-	Type resolveCommand ( const std::string& command );
+	std::set<Type> resolveCommand ( std::string command );
 
 	/**
 	 *

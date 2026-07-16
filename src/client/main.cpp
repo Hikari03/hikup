@@ -22,12 +22,12 @@ int start ( int argc, char* argv[] ) {
         return 1;
     }
 
-    std::set<Command::Type> command {Command::resolveCommand(argv[1])};
+    auto command = Command::resolveCommand(argv[1]);
 
     if ( !strcmp(argv[2], "-") )
         command.emplace(Command::Type::BATCH);
 
-    if ( command.contains(Command::Type::INVALID) ) {
+    if ( !Command::isValid(command) ) {
         std::cerr << colorize("Invalid command", Color::RED) << std::endl;
         return 1;
     }
