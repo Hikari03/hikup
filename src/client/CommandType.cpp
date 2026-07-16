@@ -1,12 +1,9 @@
 #include "CommandType.hpp"
 
-#include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace Command {
-
-
 
 	std::string toString ( const Type command ) {
 		switch ( command ) {
@@ -20,17 +17,34 @@ namespace Command {
 				return "LIST";
 			case Type::BATCH:
 				return "BATCH";
-			case Type::BATCH_UPLOAD:
-				return "BATCH_UPLOAD";
-			case Type::BATCH_DOWNLOAD:
-				return "BATCH_DOWNLOAD";
-			case Type::BATCH_REMOVE:
-				return "BATCH_REMOVE";
 			case Type::INVALID:
 				return "INVALID";
 			default: // cannot happen
 				std::unreachable();
 		}
+	}
+
+	Type selectBasic ( const std::set<Type>& commands ) {
+		if ( commands.contains(Type::UPLOAD) )
+			return Type::UPLOAD;
+
+		if ( commands.contains(Type::DOWNLOAD) )
+			return Type::DOWNLOAD;
+
+		if ( commands.contains(Type::REMOVE) )
+			return Type::REMOVE;
+
+		if ( commands.contains(Type::LIST) )
+			return Type::LIST;
+
+		return Type::INVALID;
+	}
+
+	bool isValid ( const std::set<Type>& commands ) {
+		if ( commands.contains(Type::INVALID) )
+			return true;
+
+		return false;
 	}
 
 	Type resolveCommand ( const std::string& command ) {
@@ -42,25 +56,6 @@ namespace Command {
 			return Type::LIST;
 		if ( command == "rm" )
 			return Type::REMOVE;
-
-		return Type::INVALID;
-	}
-
-	Type operator+ (Type one, Type two) {
-		if ( one != Type::BATCH && two != Type::BATCH)
-			return Type::INVALID;
-
-		if ( two == Type::BATCH )
-			std::swap(one, two);
-
-		if ( two == Type::UPLOAD )
-			return Type::BATCH_UPLOAD;
-
-		if ( two == Type::DOWNLOAD)
-			return Type::BATCH_DOWNLOAD;
-
-		if ( two == Type::REMOVE )
-			return Type::BATCH_REMOVE;
 
 		return Type::INVALID;
 	}

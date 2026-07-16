@@ -1,4 +1,5 @@
 #include <iostream>
+#include <set>
 
 #include "BatchHandlers.hpp"
 #include "CommandHandlers.hpp"
@@ -21,14 +22,17 @@ int start ( int argc, char* argv[] ) {
         return 1;
     }
 
-    auto command = Command::resolveCommand(argv[1]);
+    std::set<Command::Type> command {Command::resolveCommand(argv[1])};
 
-    if ( command == Command::Type::INVALID ) {
+    if ( !strcmp(argv[2], "-") )
+        command.emplace(Command::Type::BATCH);
+
+    if ( command.contains(Command::Type::INVALID) ) {
         std::cerr << colorize("Invalid command", Color::RED) << std::endl;
         return 1;
     }
 
-    if ( command == Command::Type::LIST && argc != 5 ) {
+    if ( command.contains(Command::Type::LIST) && argc != 5 ) {
         std::cerr << colorize("Invalid number of arguments for list command", Color::RED) << std::endl;
         printHelp(argv[0]);
         return 1;
@@ -42,12 +46,10 @@ int start ( int argc, char* argv[] ) {
     std::string serverAddr;
 
 
-    if ( (command == Command::Type::UPLOAD ||
-         command == Command::Type::REMOVE ||
-         command == Command::Type::DOWNLOAD) &&
-         !strcmp(argv[2], "-")) {
-
-        command = command + Command::Type::BATCH;
+    if ( (command.contains(Command::Type::UPLOAD) ||
+         command.contains(Command::Type::REMOVE) ||
+         command.contains(Command::Type::DOWNLOAD)) &&
+         command.contains(Command::Type::BATCH)) {
 
         std::string fileString, tmp;
 
@@ -63,7 +65,7 @@ int start ( int argc, char* argv[] ) {
         return Batch::autoResolve(command, connection, files);
     }
 
-    if ( command == Command::Type::LIST ) {
+    if ( command.contains(Command::Type::LIST) ) {
         serverAddr = argv[4];
     }
     else {
@@ -71,7 +73,7 @@ int start ( int argc, char* argv[] ) {
     }
 
     try {
-        if ( command == Command::Type::UPLOAD ) {
+        if ( command.contains(Command::Type::UPLOAD) ) {
             auto [_file, _fileSize, _fileName] = resolveFile(argv[2]);
             file = std::move(_file);
             fileSize = _fileSize;
@@ -102,13 +104,13 @@ int start ( int argc, char* argv[] ) {
         return 1;
     }
 
-    connection.sendInternal("command:" + Command::toString(command));
-    if ( command == Command::Type::UPLOAD ) {
+    connection.sendInternal("command:" + Command::toString(Command::selectBasic(command)));
+    if ( command.contains(Command::Type::UPLOAD) ) {
         connection.sendInternal("size:" + std::to_string(fileSize));
         connection.sendInternal("filename:" + fileName);
         connection.sendInternal("hash:" + hash);
     }
-    else if ( command == Command::Type::DOWNLOAD || command == Command::Type::REMOVE ) {
+    else if ( command.contains(Command::Type::DOWNLOAD) || command.contains(Command::Type::REMOVE) ) {
         fileName = argv[2];
         connection.sendInternal("hash:" + fileName);
     }
@@ -116,7 +118,7 @@ int start ( int argc, char* argv[] ) {
     if ( const auto reason = connection.receiveInternal(); reason != "OK" ) {
         std::cerr << colorize("Server did not accept the request\n", Color::RED);
 
-        if ( command == Command::Type::UPLOAD ) {
+        if ( command.contains(Command::Type::UPLOAD) ) {
             std::cout << colorize("Reason: " + reason + '\n', Color::RED) << colorize("Hash: ", Color::PURPLE) <<
                     colorize(hash, Color::CYAN) << std::endl;
             const auto httpLink = connection.receiveInternal();
@@ -127,7 +129,7 @@ int start ( int argc, char* argv[] ) {
         return 1;
     }
 
-    if ( command == Command::Type::REMOVE ) {
+    if ( command.contains(Command::Type::REMOVE) ) {
         std::cout << colorize("File with hash ", Color::GREEN) << colorize(fileName, Color::CYAN) << colorize(
             " removed!", Color::RED
         ) << std::endl;
@@ -135,11 +137,11 @@ int start ( int argc, char* argv[] ) {
     }
     std::cout << colorize("Server ready!\n", Color::GREEN) << std::endl;
 
-    if ( command == Command::Type::UPLOAD )
+    if ( command.contains(Command::Type::UPLOAD) )
         CommandHandlers::sendFile(file, fileSize, connection);
-    else if ( command == Command::Type::DOWNLOAD )
+    else if ( command.contains(Command::Type::DOWNLOAD) )
         CommandHandlers::downloadFile(connection);
-    else if ( command == Command::Type::LIST ) {
+    else if ( command.contains(Command::Type::LIST) ) {
         return CommandHandlers::listFiles(connection, argv[2], argv[3]);
     }
 

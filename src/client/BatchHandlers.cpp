@@ -5,37 +5,33 @@
 
 #include "CommandHandlers.hpp"
 
-int Batch::autoResolve ( const Command::Type type, Connection & connection, const std::vector<std::string> & files ) {
-	switch ( type ) {
-		case Command::Type::BATCH_UPLOAD:
-			return Batch::upload(files, connection);
+int Batch::autoResolve ( const std::set<Command::Type> & command, Connection & connection, const std::vector<std::string> & files ) {
+	if ( !Command::isValid(command) )
+		throw std::invalid_argument("Batch::autoResolve: invalid command.");
 
-		case Command::Type::BATCH_DOWNLOAD:
-			return Batch::download(connection, files);
+	if ( !command.contains(Command::Type::BATCH) )
+		throw std::invalid_argument("Batch::autoResolve: batch command not present.");
 
-		case Command::Type::BATCH_REMOVE:
-			return Batch::remove(connection, files);
+	if ( command.contains(Command::Type::UPLOAD) )
+		return upload(connection, files);
 
-		case Command::Type::UPLOAD:
-		case Command::Type::DOWNLOAD:
-		case Command::Type::REMOVE:
-		case Command::Type::LIST:
-		case Command::Type::BATCH:
-		case Command::Type::INVALID:
-		throw std::invalid_argument("Batch::autoResolve: invalid type");
-	}
+	if ( command.contains(Command::Type::DOWNLOAD) )
+		return download(connection, files);
 
-	std::unreachable();
+	if ( command.contains(Command::Type::REMOVE) )
+		return remove(connection, files);
+
+	throw std::invalid_argument("Batch::autoResolve: command does not contain needed types.");
 }
 
-int Batch::upload ( const std::vector<std::string>& files, Connection& connection ) {
+int Batch::upload ( Connection& connection, const std::vector<std::string>& files ) {
 	if ( !connection.isConnected() )
 		throw std::invalid_argument("Batch::upload: trying to operate without active connection");
 
 	if ( files.empty() )
 		throw std::invalid_argument("Batch::upload: no files to operate on");
 
-	connection.sendInternal("command:" + Command::toString(Command::Type::BATCH_UPLOAD))
+	connection.sendInternal("command:BATCH_UPLOAD")
 				.sendInternal("length:" + std::to_string(files.size()));
 
 	int fileNum = 0;
@@ -83,7 +79,7 @@ int Batch::download ( Connection& connection, const std::vector<std::string>& fi
 	if ( files.empty() )
 		throw std::invalid_argument("Batch::upload: no files to operate on");
 
-	connection.sendInternal("command:" + Command::toString(Command::Type::BATCH_DOWNLOAD))
+	connection.sendInternal("command:BATCH_DOWNLOAD")
 				.sendInternal("length:" + std::to_string(files.size()));
 
 	int fileNum = 0;
@@ -115,7 +111,7 @@ int Batch::remove ( Connection& connection, const std::vector<std::string>& file
 	if ( files.empty() )
 		throw std::invalid_argument("Batch::upload: no files to operate on");
 
-	connection.sendInternal("command:" + Command::toString(Command::Type::BATCH_REMOVE))
+	connection.sendInternal("command:BATCH_REMOVE")
 				.sendInternal("length:" + std::to_string(files.size()));
 
 	int fileNum = 0;
