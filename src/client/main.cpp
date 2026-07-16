@@ -7,13 +7,14 @@
 #include "../shared/Connection.hpp"
 
 void printHelp ( const std::string& argv0 ) {
-    std::cout << "Usage: " << argv0 << " <up <file> | down <hash> | rm <hash> | ls <user> <pass>> <server> \n\n"
+    std::cout << "Usage: " << argv0 << " [q]<up <file> | down <hash> | rm <hash> | ls <user> <pass>> <server> \n\n"
                 "If file is successfully uploaded, you will get file hash\n"
                 "which you need to input if you want to download it.\n\n"
                 "For ls command, provide username and password (from server settings).\n\n"
                 "If server has HTTP server, you will get link for download.\n"
                 "You can append '?view=yes' to the link to view the file in browser.\n\n"
-                "You can also replace the file/hash with `-` and pass space/new-line separated list to standard input" << std::endl;
+                "You can also replace the file/hash with `-` and pass space/new-line separated list to standard input\n\n"
+                "add `q` into argument with up, down, rm for silent run. i.e. qup" << std::endl;
 }
 
 int start ( int argc, char* argv[] ) {
