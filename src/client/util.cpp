@@ -97,7 +97,7 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 	file.clear();
 	file.seekg(0);
 
-	return std::string(reinterpret_cast<const char*>(hash.get()), hashSize);
+	return bytesToHex(hash.get(), hashSize);
 }
 
 inline std::vector<std::string> cutStringIntoVector(std::string_view str) {

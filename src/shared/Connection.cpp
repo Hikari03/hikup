@@ -154,7 +154,7 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 		 * If the failure is due to a verification error we can get more
 		 * information about it from SSL_get_verify_result().
 		 */
-		if (SSL_get_verify_result(_ssl) != X509_V_OK)
+		if ( SSL_get_verify_result(_ssl) != X509_V_OK )
 			throw std::runtime_error("Certificate verify error: " + std::string(X509_verify_cert_error_string(SSL_get_verify_result(_ssl))));
 		throw std::runtime_error("Failed to connect to the server: " + retStr);
 	}
@@ -164,7 +164,7 @@ void Connection::_send ( const char* message, const size_t length ) {
 	std::lock_guard<std::mutex> lock(_sendMutex);
 
 	size_t written = 0;
-	if ( !SSL_write_ex2(_ssl, message, length, SSL_WRITE_FLAG_CONCLUDE, &written) || written != length ) {
+	if ( !SSL_write_ex(_ssl, message, length, &written) || written != length ) {
 		throw std::runtime_error("Could not send message");
 	}
 

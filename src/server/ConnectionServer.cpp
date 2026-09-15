@@ -16,6 +16,8 @@ ConnectionServer::ConnectionServer ( ClientInfo clientInfo, const unsigned long 
 	: _buffer(std::make_unique<char[]>(bufferSize)), _clientInfo(std::move(clientInfo)), _bufferSize(bufferSize) {}
 
 ConnectionServer::~ConnectionServer () {
+	if ( !_active )
+		return;
 	_active = false;
 
 	if ( SSL_stream_conclude(_clientInfo.getConn(), 0) != 1 ) {
@@ -25,20 +27,20 @@ ConnectionServer::~ConnectionServer () {
 	}
 
 	while ( SSL_shutdown(_clientInfo.getConn()) != 1 ) {
-		std::cerr << "Re-attempting SSL shutdown\n";
+		// std::cerr << "Re-attempting SSL shutdown\n";
 	}
 
 	SSL_free(_clientInfo.getConn());
 }
 
 void ConnectionServer::init () {
-	timeval timeout{};
+	/*timeval timeout{};
 	timeout.tv_sec = 20; // Timeout in seconds
 	timeout.tv_usec = 0; // Timeout in microseconds
 
 	if ( setsockopt(SSL_get_fd(_clientInfo.getConn()), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
 		throw std::runtime_error("setsockopt failed");
-	}
+	}*/
 
 	_active = true;
 }
@@ -62,6 +64,7 @@ std::string ConnectionServer::receive () {
 		clearBuffer();
 
 		if ( const auto ret = SSL_read_ex(_clientInfo.getConn(), _buffer.get(), _bufferSize, &_sizeOfPreviousMessage); ret <= 0 ) {
+			std::string retStr;
 			switch ( const int err = SSL_get_error(_clientInfo.getConn(), ret) ) {
 
 				case SSL_ERROR_SYSCALL:
@@ -72,13 +75,40 @@ std::string ConnectionServer::receive () {
 					break;
 
 				case SSL_ERROR_ZERO_RETURN:
+					retStr = "The TLS/SSL peer has closed the connection for writing by sending the close_notify alert";
+					_active = false;
+					break;
+				case SSL_ERROR_WANT_X509_LOOKUP:
+					retStr = "SSL_ERROR_WANT_X509_LOOKUP";
+					break;
 				case SSL_ERROR_SSL:
-					throw std::runtime_error("client disconnected");
+					retStr = "SSL_ERROR_SSL";
+					ERR_print_errors_fp(stderr);
+					_active = false;
+					break;
+				case SSL_ERROR_WANT_CLIENT_HELLO_CB:
+					retStr = "SSL_ERROR_WANT_CLIENT_HELLO_CB";
+					break;
+				case SSL_ERROR_WANT_ASYNC_JOB:
+					retStr = "SSL_ERROR_WANT_ASYNC_JOB";
+					break;
+				case SSL_ERROR_WANT_ASYNC:
+					retStr = "SSL_ERROR_WANT_ASYNC";
+					break;
+				case SSL_ERROR_WANT_CONNECT:
+				case SSL_ERROR_WANT_ACCEPT:
+					retStr = "SSL_ERROR_WANT_ACCEPT/CONNECT";
+					break;
+				case SSL_ERROR_WANT_READ:
+				case SSL_ERROR_WANT_WRITE:
+					retStr = "SSL_ERROR_WANT_WRITE/READ";
+					break;
 
 				default:
 					ERR_print_errors_fp(stderr);
 					throw std::logic_error("unexpected error: " + std::to_string(err));
 			}
+			throw std::runtime_error(retStr);
 		}
 
 		_message += std::string(_buffer.get(), _sizeOfPreviousMessage);

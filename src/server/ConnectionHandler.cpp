@@ -148,7 +148,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
 	EVP_DigestFinal_ex(mdctx, hash.get(), &hashSize);
 
-	auto hashString = std::string(reinterpret_cast<const char*>(hash.get()), hashSize);
+	auto hashString = bytesToHex(hash.get(), hashSize);
 
 	if ( hashFromClient != hashString ) {
 		std::filesystem::remove(_path);

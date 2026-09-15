@@ -12,4 +12,6 @@ std::string humanReadableSpeed ( double speed );
 
 unsigned long getFreeMemory ();
 
-std::string padStringToSize ( const std::string& str, const unsigned totalLength );
+std::string padStringToSize ( const std::string& str, unsigned totalLength );
+
+std::string bytesToHex(const unsigned char* data, size_t length);
