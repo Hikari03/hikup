@@ -9,8 +9,8 @@ WORKDIR /app
 RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
     apk update && \
     apk add --no-cache openssl-dev openssl-libs-static g++ cmake make pkgconf \
-    && cmake -B build -S . \
-    && cmake --build build --target hikup-server -DHIKUP_STATIC=ON -j$(nproc) \
+    && cmake -B build -S . -DHIKUP_STATIC=ON \
+    && cmake --build build --target hikup-server -j$(nproc) \
     && mv build/hikup-server /app/hikup-server \
     && rm -rf build src server \
     && ldd /app/hikup-server
