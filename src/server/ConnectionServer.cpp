@@ -6,6 +6,8 @@
 #include <thread>
 #include <unistd.h>
 #include <utility>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 #include <sys/socket.h>
 
 ConnectionServer::ConnectionServer ( ClientInfo clientInfo ) : ConnectionServer(std::move(clientInfo), 4 * 1024 * 1024) {}
@@ -15,8 +17,18 @@ ConnectionServer::ConnectionServer ( ClientInfo clientInfo, const unsigned long 
 
 ConnectionServer::~ConnectionServer () {
 	_active = false;
-	shutdown(_clientInfo.getSocket(), SHUT_RDWR);
-	close(_clientInfo.getSocket());
+
+	if ( SSL_stream_conclude(_clientInfo.getConn(), 0) != 1 ) {
+		std::cerr << "Unable to conclude stream\n";
+		SSL_free(_clientInfo.getConn());
+		return;
+	}
+
+	while ( SSL_shutdown(_clientInfo.getConn()) != 1 ) {
+		std::cerr << "Re-attempting SSL shutdown\n";
+	}
+
+	SSL_free(_clientInfo.getConn());
 }
 
 void ConnectionServer::init () {
@@ -24,49 +36,11 @@ void ConnectionServer::init () {
 	timeout.tv_sec = 20; // Timeout in seconds
 	timeout.tv_usec = 0; // Timeout in microseconds
 
-	if ( setsockopt(_clientInfo.getSocket(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
+	if ( setsockopt(SSL_get_fd(_clientInfo.getConn()), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout )) < 0 ) {
 		throw std::runtime_error("setsockopt failed");
 	}
 
-	initEncryption();
-
 	_active = true;
-}
-
-void ConnectionServer::initEncryption () {
-	std::cout << "initializing encryption with client " << _clientInfo.getSocket() << std::endl;
-	if ( sodium_init() < 0 )
-		throw std::runtime_error("Could not initialize sodium");
-
-	if ( crypto_box_keypair(_keyPair.publicKey, _keyPair.secretKey) < 0 )
-		throw std::runtime_error("Could not generate keypair");
-
-	auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
-
-	sodium_bin2hex(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2 + 1, _keyPair.publicKey, crypto_box_PUBLICKEYBYTES);
-
-	std::cout << "public key: " << pk_hex.get() << std::endl;
-
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-	send(_internal"publicKey:" + std::string(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2));
-
-	receive();
-
-	if ( !_message.contains(_internal"publicKey:") )
-		throw std::runtime_error("Could not receive pubKey");
-
-	auto pubKey_hex = _message.substr(strlen(_internal"publicKey:"));
-
-	if ( sodium_hex2bin(_remotePublicKey, crypto_box_PUBLICKEYBYTES, pubKey_hex.c_str(), pubKey_hex.size(), nullptr,
-	                    nullptr, nullptr) < 0 ) { throw std::runtime_error("Could not decode public key"); }
-
-	//std::cout << "pubKey: " << _remotePublicKey << std::endl;
-
-	for ( auto& string: _messagesBuffer )
-		secretOpen(string);
-
-	_encrypted = true;
 }
 
 void ConnectionServer::clearBuffer () const { memset(_buffer.get(), '\0', _bufferSize); }
@@ -87,20 +61,25 @@ std::string ConnectionServer::receive () {
 		//std::cout << "RECEIVE BUFFER BEFORE CLEAR|  " << _clientInfo.getSocket() << ": " << _buffer << std::endl;
 		clearBuffer();
 
-		// receive message with timeout
-		_sizeOfPreviousMessage = recv(_clientInfo.getSocket(), _buffer.get(), _bufferSize, 0);
+		if ( const auto ret = SSL_read_ex(_clientInfo.getConn(), _buffer.get(), _bufferSize, &_sizeOfPreviousMessage); ret <= 0 ) {
+			int err = SSL_get_error(_clientInfo.getConn(), ret);
 
+			switch ( err ) {
+				case SSL_ERROR_SYSCALL:
+					if ( errno != EAGAIN && errno != EWOULDBLOCK )
+						throw std::runtime_error("client disconnected or could not receive message");
+					if ( errno == EAGAIN || errno == EWOULDBLOCK )
+						throw std::runtime_error("timeout");
+					break;
 
-		if ( _sizeOfPreviousMessage < 0 ) {
-			if ( errno != EAGAIN && errno != EWOULDBLOCK )
-				throw std::runtime_error("client disconnected or could not receive message");
+				case SSL_ERROR_ZERO_RETURN:
+				case SSL_ERROR_SSL:
+					throw std::runtime_error("client disconnected");
 
-			if ( errno == EAGAIN || errno == EWOULDBLOCK )
-				throw std::runtime_error("timeout");
-		}
-
-		if ( _sizeOfPreviousMessage == 0 ) {
-			throw std::runtime_error("client disconnected");
+				default:
+					ERR_print_errors_fp(stderr);
+					throw std::logic_error("unexpected error: " + std::to_string(err));
+			}
 		}
 
 		_message += std::string(_buffer.get(), _sizeOfPreviousMessage);
@@ -129,12 +108,6 @@ std::string ConnectionServer::receive () {
 
 	_message = tmpMessage;
 	_messagesBuffer = messages;
-
-	if ( _encrypted ) {
-		secretOpen(_message);
-		for ( auto& messageEnc: _messagesBuffer )
-			secretOpen(messageEnc);
-	}
 
 	if ( _messagesBuffer.empty() )
 		_moreInBuffer = false;
@@ -176,14 +149,14 @@ void ConnectionServer::send ( const std::string& message ) const {
 
 	//std::cout << "SEND1 |  " << _clientInfo.getSocket() << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
 
-	if ( _encrypted ) { secretSeal(messageToSend); }
 	messageToSend += _end;
 
 	//std::cout << "SEND2 |  " << _clientInfo.getSocket() << (_clientInfo.name.empty() ? "" : "/" + _clientInfo.name ) << ": " << messageToSend << std::endl;
 	if ( !_active )
 		return;
 	try {
-		if ( ::send(_clientInfo.getSocket(), messageToSend.data(), messageToSend.length(), 0) < 0 ) {
+		size_t nWritten = 0;
+		if ( SSL_write_ex(_clientInfo.getConn(), messageToSend.data(), messageToSend.length(), &nWritten) <= 0 || nWritten != messageToSend.length() ) {
 			throw std::runtime_error("Could not send message to client");
 		}
 	}
@@ -194,33 +167,3 @@ void ConnectionServer::sendData ( const std::string& message ) const { send(_dat
 
 void ConnectionServer::sendInternal ( const std::string& message ) const { send(_internal + message); }
 
-void ConnectionServer::secretSeal ( std::string& message ) const {
-	const auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
-
-	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.data()), message.size(),
-	                     _remotePublicKey) < 0 )
-		throw std::runtime_error("Could not encrypt message");
-
-	const auto messageHex = std::make_unique<unsigned char[]>(( crypto_box_SEALBYTES + message.size() ) * 2 + 1);
-
-	sodium_bin2hex(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2 + 1,
-	               cypherText.get(), crypto_box_SEALBYTES + message.size());
-
-	message = std::string(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2);
-}
-
-void ConnectionServer::secretOpen ( std::string& message ) const {
-	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
-
-	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.data()),
-	                    message.size(), nullptr, nullptr, nullptr) < 0 )
-		throw std::runtime_error("Could not decode message");
-
-	const auto decrypted = std::make_unique<unsigned char[]>(message.size() / 2 - crypto_box_SEALBYTES);
-
-	if ( crypto_box_seal_open(decrypted.get(), cypherTextBin.get(), message.size() / 2, _keyPair.publicKey,
-	                          _keyPair.secretKey) < 0 )
-		throw std::runtime_error("Could not decrypt message");
-
-	message = std::string(reinterpret_cast<char*>(decrypted.get()), message.size() / 2 - crypto_box_SEALBYTES);
-}

@@ -9,7 +9,7 @@ inline void terminal ( std::condition_variable& callBack, bool& turnOff ) {
 		std::cin >> input;
 		if ( input == "q" ) {
 			turnOff = true;
-			Utils::log(std::string("terminal: ") + "turning off server, please wait up to 15 seconds");
+			Utils::log(std::string("terminal: ") + "turning off server, please wait up to 2 seconds");
 			callBack.notify_one();
 			return;
 		}

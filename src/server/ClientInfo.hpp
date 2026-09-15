@@ -1,25 +1,21 @@
 #pragma once
 
 #include <string>
-#include <vector>
-#include <arpa/inet.h>
 #include <netinet/in.h>
+#include <openssl/types.h>
 
 struct ClientInfo {
-
-	ClientInfo() = default;
-
-	bool init(const std::string & _ip, const int & socket);
+	ClientInfo();
+	explicit ClientInfo(SSL* _conn);
 
 	[[nodiscard]] std::string getIp() const;
-	[[nodiscard]] int getSocket() const;
+	[[nodiscard]] SSL* getConn() const;
 
-	static std::string convertAddrToString(const sockaddr_in & addr);
+	static std::string convertAddrToString( const sockaddr_in & addr );
+	static std::string convertConnToString( const SSL * conn );
 
 private:
 	std::string ip;
-	int socket_ = 0;
-
-	bool initialized = false;
-
+	SSL* conn = nullptr;
+	bool valid = false;
 };

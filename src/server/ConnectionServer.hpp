@@ -3,6 +3,7 @@
 #include <iostream>
 #include <memory>
 #include <sodium.h>
+#include <vector>
 
 #include "ClientInfo.hpp"
 
@@ -53,7 +54,7 @@ private:
 	std::vector<std::string> _messagesBuffer;
 
 
-	long int _sizeOfPreviousMessage = 0;
+	size_t _sizeOfPreviousMessage = 0;
 	unsigned long _bufferSize = 4*1024*1024;
 	std::string _message;
 
@@ -62,12 +63,7 @@ private:
 	bool _encrypted = false;
 	bool _moreInBuffer = false;
 
-	void initEncryption ();
 
 	void clearBuffer () const;
-
-	void secretOpen ( std::string& message ) const;
-
-	void secretSeal ( std::string& message ) const;
 
 };

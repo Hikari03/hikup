@@ -10,9 +10,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DHIKUP_DEBUG -Wall -Wextra -g -pedantic -Werror")
 set(CMAKE_CXX_FLAGS_RELEASE  "${CMAKE_CXX_FLAGS_RELEASE} -Wall -Wextra -pedantic -Werror -O2")
 
-# Include libsodium
+# Include libsodium and openssl
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBSODIUM REQUIRED libsodium)
+pkg_check_modules(OPENSSL REQUIRED openssl)
 
 add_executable(hikup src/client/main.cpp
         src/shared/Connection.hpp
@@ -57,10 +58,15 @@ add_executable(hikup-server src/server/main.cpp
         src/server/utils.cpp
         src/server/utils.hpp
         src/server/FileTracker.cpp
-        src/server/FileTracker.hpp)
+        src/server/FileTracker.hpp
+        src/server/CertGen.cpp
+        src/server/CertGen.hpp)
 
 target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hikup ${LIBSODIUM_LIBRARIES})
 
 target_include_directories(hikup-server PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
 target_link_libraries(hikup-server ${LIBSODIUM_LIBRARIES})
+
+find_package(OpenSSL REQUIRED)
+target_link_libraries(hikup-server OpenSSL::SSL)
