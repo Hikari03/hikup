@@ -10,7 +10,7 @@ RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositor
     apk update && \
     apk add --no-cache openssl-dev openssl-libs-static g++ cmake make pkgconf \
     && cmake -B build -S . \
-    && cmake --build build --target hikup-server -j$(nproc) \
+    && cmake --build build --target hikup-server -DHIKUP_STATIC=ON -j$(nproc) \
     && mv build/hikup-server /app/hikup-server \
     && rm -rf build src server \
     && ldd /app/hikup-server
