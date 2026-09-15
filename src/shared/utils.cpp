@@ -33,22 +33,6 @@ std::string humanReadableSpeed ( double speed ) {
     return oss.str();
 }
 
-std::string binToHex ( const unsigned char* bin, const size_t size ) {
-    const auto hex = std::make_unique<char[]>(size * 2 + 1);
-
-    sodium_bin2hex(hex.get(), size * 2 + 1, bin, size);
-
-    return {hex.get(), size * 2};
-}
-
- std::pair<unsigned char*, size_t> hexToBin ( const std::string& hex ) {
-    const auto bin = std::make_unique<unsigned char[]>(hex.size() / 2);
-
-    sodium_hex2bin(bin.get(), hex.size() / 2, hex.c_str(), hex.size(), nullptr, nullptr, nullptr);
-
-    return {bin.get(), hex.size() / 2};
-}
-
 unsigned long getFreeMemory () {
     struct sysinfo memInfo{};
     sysinfo(&memInfo);

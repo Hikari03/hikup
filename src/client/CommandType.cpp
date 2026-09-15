@@ -22,6 +22,8 @@ namespace Command {
 				return "QUIET";
 			case Type::INVALID:
 				return "INVALID";
+			case Type::SSL_DO_NOT_VERIFY_CERT:
+				return "SSL_DO_NOT_VERIFY_CERT";
 			default: // cannot happen
 				std::unreachable();
 		}
@@ -76,6 +78,11 @@ namespace Command {
 		if ( pos = command.find('q'); pos != std::string::npos ) {
 			command.erase(pos, 1);
 			res.emplace(Type::QUIET);
+		}
+
+		if ( pos = command.find('v'); pos != std::string::npos ) {
+			command.erase(pos, 1);
+			res.emplace(Type::SSL_DO_NOT_VERIFY_CERT);
 		}
 
 		if ( res.empty() || !command.empty() )

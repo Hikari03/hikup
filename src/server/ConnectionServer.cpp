@@ -62,9 +62,8 @@ std::string ConnectionServer::receive () {
 		clearBuffer();
 
 		if ( const auto ret = SSL_read_ex(_clientInfo.getConn(), _buffer.get(), _bufferSize, &_sizeOfPreviousMessage); ret <= 0 ) {
-			int err = SSL_get_error(_clientInfo.getConn(), ret);
+			switch ( const int err = SSL_get_error(_clientInfo.getConn(), ret) ) {
 
-			switch ( err ) {
 				case SSL_ERROR_SYSCALL:
 					if ( errno != EAGAIN && errno != EWOULDBLOCK )
 						throw std::runtime_error("client disconnected or could not receive message");

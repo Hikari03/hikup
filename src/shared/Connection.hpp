@@ -8,7 +8,8 @@
 #include <mutex>
 #include <memory>
 #include <thread>
-#include <sodium.h>
+#include <openssl/bio.h>
+#include <openssl/types.h>
 
 #ifdef __linux__
 #include <sys/socket.h>
@@ -49,7 +50,7 @@ public:
 
 	~Connection ();
 
-	void connectToServer ( std::string ip, int port, time_t timeout = 20 );
+	void connectToServer ( std::string ip, int port, bool forceServerCertVerify = true );
 
 	Connection& send ( const std::string& message );
 
@@ -72,37 +73,20 @@ public:
 	void close ();
 
 private:
-	struct KeyPair {
-		unsigned char publicKey[crypto_box_PUBLICKEYBYTES];
-		unsigned char secretKey[crypto_box_SECRETKEYBYTES];
-	};
 
 	std::unique_ptr<char[]> _buffer;
 	std::vector<std::string> _messagesBuffer;
-	KeyPair _keyPair;
-	unsigned char _remotePublicKey[crypto_box_PUBLICKEYBYTES];
 	unsigned long _bufferSize = 4*1024*1024;
 	std::mutex _sendMutex;
+	SSL_CTX *_ctx;
+	SSL *_ssl;
+	BIO *_bio;
 
-#ifdef __linux__
-	int _socket;
-	sockaddr_in _server;
-#elif _WIN32
-	WSADATA _wsaData;
-	SOCKET _socket = INVALID_SOCKET;
-	struct addrinfo *_result = NULL,
-                *_ptr = NULL,
-                _hints;
-#endif
-
-	ssize_t _sizeOfPreviousMessage = 0;
+	size_t _sizeOfPreviousMessage = 0;
 	bool _active = true;
-	bool _encrypted = false;
 	bool _moreInBuffer = false;
 
 	void clearBuffer () const;
-
-	[[nodiscard]] static std::vector<std::string> dnsLookup ( const std::string& domain, int ipv = 4 );
 
 	void _send ( const char* message, size_t length );
 

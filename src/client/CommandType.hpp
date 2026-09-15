@@ -12,6 +12,7 @@ namespace Command {
 		LIST,
 		BATCH,
 		QUIET,
+		SSL_DO_NOT_VERIFY_CERT,
 		INVALID
 	};
 

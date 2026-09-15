@@ -8,8 +8,8 @@
 #include <vector>
 #include <netinet/in.h>
 #include <openssl/bio.h>
-#include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/ssl.h>
 #include <openssl/quic.h>
 #include <sys/socket.h>
 
@@ -91,7 +91,7 @@ int main () {
 	SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nullptr);
 
 	SSL_CTX_set_alpn_select_cb(ctx, select_alpn, NULL);
-	
+
 
 	const int serverSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
