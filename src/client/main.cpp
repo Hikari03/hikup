@@ -15,7 +15,7 @@ void printHelp ( const std::string& argv0 ) {
                 "You can append '?view=yes' to the link to view the file in browser.\n\n"
                 "You can also replace the file/hash with `-` and pass space/new-line separated list to standard input\n\n"
                 "add `q` into argument with up, down, rm for silent run. i.e. qup\n"
-                "add `v` to force TLS to not verify server certificate" << std::endl;
+                "add `v` to force TLS to verify server certificate" << std::endl;
 }
 
 int start ( int argc, char* argv[] ) {
@@ -26,7 +26,7 @@ int start ( int argc, char* argv[] ) {
 
     auto command = Command::resolveCommand(argv[1]);
 
-    bool SSLVerifyCert = !command.contains(Command::Type::SSL_DO_NOT_VERIFY_CERT);
+    bool SSLVerifyCert = command.contains(Command::Type::SSL_VERIFY_CERT);
 
     const auto quiet = command.contains(Command::Type::QUIET);
 

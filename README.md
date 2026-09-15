@@ -7,7 +7,7 @@
 ### File Sharing Made Easy
 
 - **File Management**: Effortlessly upload, download, and remove files with just one command.
-- **Secure Transfer**: All data transfers between the client and server are encrypted to ensure data integrity and privacy. ***( for the moment susceptible to man-in-the-middle attacks)***
+- **Secure Transfer**: All data transfers between the client and server are encrypted using TLS to ensure data integrity and privacy. (man-in-the-middle attack not possible with installed certificates)
 - **File Sharing in Three Simple Steps**:
     1. Upload the desired file to the server and receive a unique hash and HTTP link.
     2. Share the generated hash or link with designated recipients.
@@ -25,6 +25,7 @@
 - `hikup rm <file> <server-address>`: Remove a file.
 - `hikup ls <user> <pass> <server-address>`: List all files (requires authentication).
 - add `q` into first argument for quiet run: like qup, qdown, ...
+- add `v` to force TLS to verify server certificate
 
 > [!NOTE]
 > When an operation with more files at once is desired, pipe space or new-line separated list of files/hashes into program and in arguments enter `-` in the normal place.
@@ -32,7 +33,7 @@
 
 ## Dependencies
 ### Shared
-- `cmake`, `libsodium`, `g++` with c++23 support
+- `cmake`, `OpenSSL`, `g++` with c++23 support
 
 ### Server
 - `docker`, `docker-compose` (optional)
@@ -101,6 +102,9 @@ cmake --build build --target hikup-server -j $(nproc)
 ``` bash
 ./hikup-server
 ```
+
+## Static builds
+Use `*-static`flavours of scripts for this. Ensure that you have static library of OpenSSL.
 
 # Acknowledgements
 - [libsodium](https://github.com/jedisct1/libsodium) for encryption
