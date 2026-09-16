@@ -66,6 +66,7 @@ cmake --build build --target hikup -j $(nproc)
 ### Sync
 - Sync files between servers in declared periods.
 - To use this, add target in settings in `[syncTargets]` section.
+- If certificate verify is desired and custom CA certificate was used, place it into `trusted-certs/` directory. 
 
 > [!WARNING]
 >**The declared target will be the master in one case**: if you uploaded a removed file and that removal synced. Which means if you again upload this file on non-master, your master will remove it on the next sync.
