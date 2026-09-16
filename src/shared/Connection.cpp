@@ -1,5 +1,6 @@
 #include "Connection.hpp"
 
+#include <filesystem>
 #include <iostream>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -11,7 +12,11 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 	}
 
 	SSL_CTX_set_default_verify_paths(_ctx);
-	
+
+	if ( std::filesystem::exists("trusted-certs") )
+		for ( const auto & cert : std::filesystem::directory_iterator("trusted-certs") )
+			if (!SSL_CTX_load_verify_locations(_ctx, cert.path().c_str() , nullptr))
+
 	memset(_buffer.get(), '\0', _bufferSize);
 }
 

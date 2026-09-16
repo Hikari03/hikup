@@ -86,7 +86,7 @@ X509Ptr CertGen::makeRootCertificate ( EVP_PKEY* key, const long days ) {
 		fail("setting version failed");
 
 	setRandomSerial(crt.get());
-	setName(crt.get(), "CZ", "Hikup", "Hikup Default Cert");
+	setName(crt.get(), "CZ", "Hikup", ("Hikup Default Cert n." + std::to_string(rand())).c_str() );
 
 	if ( !X509_gmtime_adj(X509_getm_notBefore(crt.get()), 0) || !X509_gmtime_adj(
 		     X509_getm_notAfter(crt.get()), 60L * 60 * 24 * days) )

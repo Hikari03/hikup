@@ -71,7 +71,7 @@ cmake --build build --target hikup -j $(nproc)
 >**The declared target will be the master in one case**: if you uploaded a removed file and that removal synced. Which means if you again upload this file on non-master, your master will remove it on the next sync.
 
 ### Default Ports
-- **Hikup protocol**: 6998
+- **Hikup protocol**: 6998/udp
   - If you want to change it, you can do so in `server/ConnectionServer.cpp` and `src/main.cpp`
 - **HTTP protocol**: 6997
   - Can be changed in `settings/settings.json`

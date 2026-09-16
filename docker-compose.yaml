@@ -1,6 +1,6 @@
 services:
   hikup-server:
-    image: hikari03/hikup:test
+    image: hikari03/hikup:edge
     container_name: hikup-server
     ports:
       - "6997:6997"
@@ -11,4 +11,5 @@ services:
     volumes:
       - ./settings:/app/settings
       - ./auth:/app/auth
+      - ./trusted-certs:/app/trusted-certs
       - ./storage:/app/storage

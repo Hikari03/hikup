@@ -63,6 +63,7 @@ int main () {
 	std::filesystem::create_directory("storage");
 	std::filesystem::create_directory("links");
 	std::filesystem::create_directory("auth");
+	std::filesystem::create_directory("trusted-certs");
 
 	const Settings settings = Settings::loadFromFile("settings/settings.toml");
 
