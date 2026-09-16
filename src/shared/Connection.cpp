@@ -10,6 +10,8 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 		throw std::runtime_error("Failed to create the SSL_CTX");
 	}
 
+	SSL_CTX_set_default_verify_paths(_ctx);
+	
 	memset(_buffer.get(), '\0', _bufferSize);
 }
 
@@ -49,7 +51,7 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 		}
 
 		/* Set to nonblocking mode */
-		if (!BIO_socket_nbio(sock, 1)) {
+		if ( !BIO_socket_nbio(sock, 1) ) {
 			BIO_closesocket(sock);
 			sock = -1;
 			continue;
@@ -69,12 +71,16 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 	/* Free the address information resources we allocated earlier */
 	BIO_ADDRINFO_free(res);
 
-	if (sock == -1)
+	if ( sock == -1 ) {
+		BIO_ADDR_free(peerAddr);
+		BIO_closesocket(sock);
 		throw std::runtime_error("Could not connect");
+	}
 
 	/* Create a BIO to wrap the socket */
 	_bio = BIO_new(BIO_s_datagram());
-	if (_bio == nullptr ) {
+	if ( _bio == nullptr ) {
+		BIO_ADDR_free(peerAddr);
 		BIO_closesocket(sock);
 		throw std::runtime_error("Could not connect");
 	}
@@ -90,26 +96,37 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 
 	_ssl = SSL_new(_ctx);
 
-	if (!SSL_set_tlsext_host_name(_ssl, ip.c_str())) {
-		throw std::runtime_error("Failed to set the SNI hostname\n");
+	if ( !SSL_set_tlsext_host_name(_ssl, ip.c_str()) ) {
+		BIO_ADDR_free(peerAddr);
+		BIO_closesocket(sock);
+		throw std::runtime_error("Failed to set the SNI hostname");
 	}
 
 	unsigned char alpn[] = { 9, 'h', 'i', 'k', 'u', 'p', '/', '1', '.', '0' };
 
 	/* SSL_set_alpn_protos returns 0 for success! */
-	if (SSL_set_alpn_protos(_ssl, alpn, sizeof(alpn)) != 0) {
-		throw std::runtime_error("Failed to set the ALPN for the connection\n");
+	if ( SSL_set_alpn_protos(_ssl, alpn, sizeof( alpn )) != 0 ) {
+		BIO_ADDR_free(peerAddr);
+		BIO_closesocket(sock);
+		throw std::runtime_error("Failed to set the ALPN for the connection");
 	}
 
 	/* Set the IP address of the remote peer */
-	if (!SSL_set1_initial_peer_addr(_ssl, peerAddr)) {
-		throw std::runtime_error("Failed to set the initial peer address\n");
+	if ( !SSL_set1_initial_peer_addr(_ssl, peerAddr) ) {
+		BIO_ADDR_free(peerAddr);
+		BIO_closesocket(sock);
+		throw std::runtime_error("Failed to set the initial peer address");
 	}
 
 	BIO_ADDR_free(peerAddr);
 
-	if ( !forceServerCertVerify )
-		SSL_CTX_set_verify(_ctx, SSL_VERIFY_NONE, nullptr);
+	SSL_set_verify(_ssl, forceServerCertVerify ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, nullptr);
+
+	if ( forceServerCertVerify ) {
+		if ( !SSL_set1_host(_ssl, ip.c_str()) ) {
+			throw std::runtime_error("Failed to set expected hostname for certificate verification");
+		}
+	}
 
 	SSL_set_bio(_ssl, _bio, _bio);
 
@@ -373,6 +390,8 @@ void Connection::close () {
 			throw std::runtime_error("Error shutting down: " + std::to_string(ret));
 		}
 	} while (ret != 1);
+
+	SSL_CTX_free(_ctx);
 
 	_active = false;
 }

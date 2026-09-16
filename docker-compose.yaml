@@ -10,4 +10,5 @@ services:
     restart: always
     volumes:
       - ./settings:/app/settings
+      - ./auth:/app/auth
       - ./storage:/app/storage

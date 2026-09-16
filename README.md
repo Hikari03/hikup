@@ -7,7 +7,7 @@
 ### File Sharing Made Easy
 
 - **File Management**: Effortlessly upload, download, and remove files with just one command.
-- **Secure Transfer**: All data transfers between the client and server are encrypted using TLS to ensure data integrity and privacy. (man-in-the-middle attack not possible with installed certificates)
+- **Secure Transfer**: All data transfers between the client and server are encrypted using QUIC to ensure data integrity and privacy. (man-in-the-middle attack not possible with installed certificates)
 - **File Sharing in Three Simple Steps**:
     1. Upload the desired file to the server and receive a unique hash and HTTP link.
     2. Share the generated hash or link with designated recipients.
@@ -56,6 +56,12 @@ cmake --build build --target hikup -j $(nproc)
 
 ### Settings
 - All available runtime settings are in `settings/settings.toml` with descriptions.
+
+### Certificate use
+- All certificates are stored in `auth/`
+- Expected name for chain certificate is `server_fullchain.pem` and for private key `server_key.pem`.
+- When no certificate or key is present, server will generate its own CA and certificate.
+- If this happens, the hostname declared in settings will be used. You will also need to add the `ca_cert.pem` as your trusted CA.
 
 ### Sync
 - Sync files between servers in declared periods.

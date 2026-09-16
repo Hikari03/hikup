@@ -62,6 +62,7 @@ int main () {
 
 	std::filesystem::create_directory("storage");
 	std::filesystem::create_directory("links");
+	std::filesystem::create_directory("auth");
 
 	const Settings settings = Settings::loadFromFile("settings/settings.toml");
 
@@ -75,16 +76,23 @@ int main () {
 		return 1;
 	}
 
-	if ( !std::filesystem::exists("ca_key.pem") || !std::filesystem::exists("ca_cert.pem") )
-		CertGen::generate();
+	constexpr char serverFullChainCert[] = "auth/server_fullchain.pem";
+	constexpr char serverKey[] = "auth/server_key.pem";
 
-	if ( SSL_CTX_use_certificate_chain_file(ctx, "ca_cert.pem") <= 0 ) {
-		std::cerr << "main: couldn't load certificate file: ca_cert.pem" << std::endl;
+	if ( !std::filesystem::exists(serverFullChainCert) || !std::filesystem::exists(serverKey) ) {
+		CertGen::generateRoot();
+		CertGen::generateServerCert("auth/ca_key.pem", "auth/ca_cert.pem",
+			settings.hostname.c_str(), { "DNS:" + settings.hostname, "DNS:localhost", "IP:127.0.0.1", "IP:::1" });
+	}
+
+
+	if ( SSL_CTX_use_certificate_chain_file(ctx, serverFullChainCert) <= 0 ) {
+		std::cerr << "main: couldn't load certificate file: " << serverFullChainCert << std::endl;
 		return 1;
 	}
 
-	if ( SSL_CTX_use_PrivateKey_file(ctx, "ca_key.pem", SSL_FILETYPE_PEM) <= 0 ) {
-		std::cerr << "main: couldn't load private key file: ca_key.pem" << std::endl;
+	if ( SSL_CTX_use_PrivateKey_file(ctx, serverKey, SSL_FILETYPE_PEM) <= 0 ) {
+		std::cerr << "main: couldn't load private key file: " << serverKey << std::endl;
 		return 1;
 	}
 
