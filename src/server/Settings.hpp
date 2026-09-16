@@ -34,6 +34,7 @@ struct Settings {
         std::string targetAddress;
         std::string targetUser;
         std::string targetPass;
+        bool tlsCertVerify;
     };
 };
 

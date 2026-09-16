@@ -265,7 +265,7 @@ void ConnectionHandler::_removeOnSyncedTargets ( const std::string& hash ) {
 	for ( const auto& target: _settings.syncTargets ) {
 		Connection connection;
 
-		try { connection.connectToServer(target.targetAddress, 6998, false); }
+		try { connection.connectToServer(target.targetAddress, 6998, target.tlsCertVerify); }
 		catch ( ... ) {
 			Utils::log("removeOnSyncedTargets: Could not connect to remote");
 			continue;
@@ -500,7 +500,7 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 	// send command type and authenticate
 	std::lock_guard lock(_syncMutex);
 	Connection connection;
-	connection.connectToServer(target.targetAddress, 6998, false);
+	connection.connectToServer(target.targetAddress, 6998, target.tlsCertVerify);
 
 	connection.sendInternal("command:SYNC")
 		.sendInternal("user:" + target.targetUser)

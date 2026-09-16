@@ -63,7 +63,8 @@ Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
                 target->get("name")->as_string()->value_or("INVALID"),
                 target->get("address")->as_string()->value_or("INVALID"),
                 target->get("user")->as_string()->value_or("INVALID"),
-                target->get("pass")->as_string()->value_or("INVALID")
+                target->get("pass")->as_string()->value_or("INVALID"),
+                target->get("tlsCertVerify")->as_boolean()->value_or(false)
             );
 
             ++it;
@@ -92,12 +93,13 @@ std::string Settings::toString () const {
 
                 std::string result = "syncTargets:\n";
 
-                for ( const auto& [targetName, targetAddress, targetUser, targetPass] : syncTargets ) {
+                for ( const auto& [targetName, targetAddress, targetUser, targetPass, tlsCertVerify] : syncTargets ) {
                     result += "  " + targetName + ":\n";
                     result += "    address: " + targetAddress + '\n';
                     result += "    user: " + targetUser + '\n';
                     result += "    pass: " + targetPass + '\n';
-                    result += "\n";
+                    result += "    tlsCertVerify: " + std::to_string(tlsCertVerify) + '\n';
+                    result += '\n';
                 }
 
                 result += "  syncPeriod: " + std::to_string(syncPeriod) + '\n';
