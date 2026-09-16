@@ -2,7 +2,7 @@
 
 #include <iostream>
 #include <memory>
-#include <sodium.h>
+#include <vector>
 
 #include "ClientInfo.hpp"
 
@@ -42,32 +42,20 @@ public:
 	[[nodiscard]] bool isActive () const;
 
 private:
-	struct KeyPair {
-		unsigned char publicKey[crypto_box_PUBLICKEYBYTES];
-		unsigned char secretKey[crypto_box_SECRETKEYBYTES];
-	};
 
 	std::unique_ptr<char[]> _buffer;
-	KeyPair _keyPair;
 	ClientInfo _clientInfo;
 	std::vector<std::string> _messagesBuffer;
 
 
-	long int _sizeOfPreviousMessage = 0;
+	size_t _sizeOfPreviousMessage = 0;
 	unsigned long _bufferSize = 4*1024*1024;
 	std::string _message;
 
-	unsigned char _remotePublicKey[crypto_box_PUBLICKEYBYTES];
 	bool _active = true;
-	bool _encrypted = false;
 	bool _moreInBuffer = false;
 
-	void initEncryption ();
 
 	void clearBuffer () const;
-
-	void secretOpen ( std::string& message ) const;
-
-	void secretSeal ( std::string& message ) const;
 
 };

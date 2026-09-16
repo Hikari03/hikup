@@ -6,13 +6,29 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+option(HIKUP_STATIC "Build hikup statically" OFF)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DHIKUP_DEBUG -Wall -Wextra -g -pedantic -Werror")
 set(CMAKE_CXX_FLAGS_RELEASE  "${CMAKE_CXX_FLAGS_RELEASE} -Wall -Wextra -pedantic -Werror -O2")
 
-# Include libsodium
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBSODIUM REQUIRED libsodium)
+# Check the flag status
+if(HIKUP_STATIC)
+    message(STATUS "Configuring for static build")
+
+    # Disable shared libraries for dependencies
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+    # Example: Apply -static flag to GCC/Clang
+    if(UNIX AND NOT APPLE)
+        set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+        set(BUILD_SHARED_LIBS OFF)
+        set(CMAKE_EXE_LINKER_FLAGS "-static")
+    endif()
+
+else()
+    message(STATUS "Configuring for dynamic build")
+endif()
 
 add_executable(hikup src/client/main.cpp
         src/shared/Connection.hpp
@@ -57,10 +73,10 @@ add_executable(hikup-server src/server/main.cpp
         src/server/utils.cpp
         src/server/utils.hpp
         src/server/FileTracker.cpp
-        src/server/FileTracker.hpp)
+        src/server/FileTracker.hpp
+        src/server/CertGen.cpp
+        src/server/CertGen.hpp)
 
-target_include_directories(hikup PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
-target_link_libraries(hikup ${LIBSODIUM_LIBRARIES})
-
-target_include_directories(hikup-server PRIVATE ${LIBSODIUM_INCLUDE_DIRS})
-target_link_libraries(hikup-server ${LIBSODIUM_LIBRARIES})
+find_package(OpenSSL REQUIRED)
+target_link_libraries(hikup OpenSSL::SSL)
+target_link_libraries(hikup-server OpenSSL::SSL)

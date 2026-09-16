@@ -45,7 +45,7 @@ int Batch::upload ( Connection& connection, const std::vector<std::string>& file
 		auto [file, fileSize, fileName] = resolveFile(fileString);
 
 		const auto freeMem = getFreeMemory();
-		auto toAllocate = std::min(freeMem / 4, static_cast<unsigned long>(fileSize / 16));
+		auto toAllocate = std::min(freeMem / 4, static_cast<unsigned long>(fileSize / 4));
 		if ( toAllocate < freeMem / 2 )
 			toAllocate = std::min(freeMem, static_cast<unsigned long>(fileSize));
 

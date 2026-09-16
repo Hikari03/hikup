@@ -1,116 +1,222 @@
 #include "Connection.hpp"
 
+#include <filesystem>
 #include <iostream>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 
 Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_unique<char[]>(bufferSize)), _bufferSize(bufferSize) {
-#ifdef __linux__
-	_socket = socket(AF_INET, SOCK_STREAM, 0);
-	if ( _socket == -1 ) { throw std::runtime_error("Could not create socket"); }
-#elif _WIN32
-	WSADATA _wsaData;
-	if (WSAStartup(MAKEWORD(2, 2), &_wsaData) != 0) {
-		throw std::runtime_error("Could not initialize Winsock");
+	_ctx = SSL_CTX_new(OSSL_QUIC_client_method());
+	if ( _ctx == nullptr ) {
+		throw std::runtime_error("Failed to create the SSL_CTX");
 	}
 
-	ZeroMemory( &_hints, sizeof(_hints) );
-	_hints.ai_family   = AF_INET;
-	_hints.ai_socktype = SOCK_STREAM;
-	_hints.ai_protocol = IPPROTO_TCP;
-#endif
+	SSL_CTX_set_default_verify_paths(_ctx);
 
-	if ( sodium_init() < 0 ) { throw std::runtime_error("Could not initialize sodium"); }
+	if ( std::filesystem::exists("trusted-certs") )
+		for ( const auto & cert : std::filesystem::directory_iterator("trusted-certs") )
+			if (!SSL_CTX_load_verify_locations(_ctx, cert.path().c_str() , nullptr))
 
-	crypto_box_keypair(_keyPair.publicKey, _keyPair.secretKey);
 	memset(_buffer.get(), '\0', _bufferSize);
 }
 
-void Connection::connectToServer ( std::string ip, const int port, const time_t timeout ) {
-	if ( ip == "localhost" || ip.empty() )
-		ip = "127.0.0.1";
+void Connection::connectToServer ( std::string ip, const int port, const bool forceServerCertVerify ) {
+	// implementation heavily inspired by https://github.com/openssl/openssl/blob/master/demos/guide/quic-client-block.c#L30
 
-#ifdef __linux__
-	_server.sin_family = AF_INET;
-	_server.sin_port = htons(port);
+	int sock = -1;
+	BIO_ADDRINFO *res;
+	const BIO_ADDRINFO* ai;
+	BIO_ADDR *peerAddr = nullptr;
 
+	if ( !BIO_lookup_ex(ip.c_str(), std::to_string(port).c_str(), BIO_LOOKUP_CLIENT, AF_INET, SOCK_DGRAM, 0, &res) ) {
+		throw std::runtime_error("Could not resolve the target server.");
+	}
 
-	if ( inet_pton(AF_INET, ip.c_str(), &_server.sin_addr) <= 0 ) {
-		if ( const auto result = dnsLookup(ip); result.empty() ) {
-			throw std::runtime_error("Invalid address / Address not supported");
+	/*
+	 * Loop through all the possible addresses for the server and find one
+	 * we can connect to.
+	 */
+	for ( ai = res; ai != nullptr; ai = BIO_ADDRINFO_next(ai)) {
+		/*
+		 * Create a TCP socket. We could equally use non-OpenSSL calls such
+		 * as "socket" here for this and the subsequent connect and close
+		 * functions. But for portability reasons and also so that we get
+		 * errors on the OpenSSL stack in the event of a failure we use
+		 * OpenSSL's versions of these functions.
+		 */
+		sock = BIO_socket(BIO_ADDRINFO_family(ai), SOCK_DGRAM, 0, 0);
+		if ( sock == -1 )
+			continue;
+
+		/* Connect the socket to the server's address */
+		if ( !BIO_connect(sock, BIO_ADDRINFO_address(ai), 0) ) {
+			BIO_closesocket(sock);
+			sock = -1;
+			continue;
 		}
-		else {
-			ip = result[0];
-			if ( inet_pton(AF_INET, ip.c_str(), &_server.sin_addr) <= 0 ) {
-				throw std::runtime_error("Invalid address / Address not supported");
-			}
+
+		/* Set to nonblocking mode */
+		if ( !BIO_socket_nbio(sock, 1) ) {
+			BIO_closesocket(sock);
+			sock = -1;
+			continue;
+		}
+
+		break;
+	}
+
+	if ( sock != -1 ) {
+		peerAddr = BIO_ADDR_dup(BIO_ADDRINFO_address(ai));
+		if ( peerAddr == nullptr ) {
+			BIO_closesocket(sock);
+			return;
 		}
 	}
 
-	timeval _timeout{};
-	_timeout.tv_sec = timeout; // Timeout in seconds
-	_timeout.tv_usec = 0; // Timeout in microseconds
+	/* Free the address information resources we allocated earlier */
+	BIO_ADDRINFO_free(res);
 
-	if ( setsockopt(_socket, SOL_SOCKET, SO_RCVTIMEO, &_timeout, sizeof( _timeout )) < 0 ) {
-		throw std::runtime_error("setsockopt failed");
+	if ( sock == -1 ) {
+		BIO_ADDR_free(peerAddr);
+		BIO_closesocket(sock);
+		throw std::runtime_error("Could not connect");
 	}
 
-	if ( connect(_socket, reinterpret_cast<sockaddr*>(&_server), sizeof( _server )) < 0 ) {
-		throw std::runtime_error("Could not connect to server");
+	/* Create a BIO to wrap the socket */
+	_bio = BIO_new(BIO_s_datagram());
+	if ( _bio == nullptr ) {
+		BIO_ADDR_free(peerAddr);
+		BIO_closesocket(sock);
+		throw std::runtime_error("Could not connect");
 	}
 
+	/*
+	 * Associate the newly created BIO with the underlying socket. By
+	 * passing BIO_CLOSE here the socket will be automatically closed when
+	 * the BIO is freed. Alternatively you can use BIO_NOCLOSE, in which
+	 * case you must close the socket explicitly when it is no longer
+	 * needed.
+	 */
+	BIO_set_fd(_bio, sock, BIO_CLOSE);
 
-	receive(); // encryption initialization
+	_ssl = SSL_new(_ctx);
 
-
-#elif _WIN32
-	if(getaddrinfo(ip.c_str(), std::to_string(port).c_str(), &_hints, &_result) != 0) {
-		WSACleanup();
-		throw std::runtime_error("Could not get address info");
+	if ( !SSL_set_tlsext_host_name(_ssl, ip.c_str()) ) {
+		BIO_ADDR_free(peerAddr);
+		BIO_closesocket(sock);
+		throw std::runtime_error("Failed to set the SNI hostname");
 	}
 
-    _ptr = _result;
+	unsigned char alpn[] = { 9, 'h', 'i', 'k', 'u', 'p', '/', '1', '.', '0' };
 
-	_socket = socket(_ptr->ai_family, _ptr->ai_socktype, _ptr->ai_protocol);
-	if (_socket == INVALID_SOCKET) {
-		WSACleanup();
-		throw std::runtime_error("Could not create socket");
+	/* SSL_set_alpn_protos returns 0 for success! */
+	if ( SSL_set_alpn_protos(_ssl, alpn, sizeof( alpn )) != 0 ) {
+		BIO_ADDR_free(peerAddr);
+		BIO_closesocket(sock);
+		throw std::runtime_error("Failed to set the ALPN for the connection");
 	}
 
-	if (connect(_socket, _ptr->ai_addr, (int)_ptr->ai_addrlen) == SOCKET_ERROR) {
-		closesocket(_socket);
-		_socket = INVALID_SOCKET;
-		freeaddrinfo(_result);
-		throw std::runtime_error("Could not connect to server");
+	/* Set the IP address of the remote peer */
+	if ( !SSL_set1_initial_peer_addr(_ssl, peerAddr) ) {
+		BIO_ADDR_free(peerAddr);
+		BIO_closesocket(sock);
+		throw std::runtime_error("Failed to set the initial peer address");
 	}
-	freeaddrinfo(_result);
 
-#endif
+	BIO_ADDR_free(peerAddr);
+
+	SSL_set_verify(_ssl, forceServerCertVerify ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, nullptr);
+
+	if ( forceServerCertVerify ) {
+		if ( !SSL_set1_host(_ssl, ip.c_str()) ) {
+			throw std::runtime_error("Failed to set expected hostname for certificate verification");
+		}
+	}
+
+	SSL_set_bio(_ssl, _bio, _bio);
+
+	/* Do the handshake with the server */
+	if ( const auto ret = SSL_connect(_ssl); ret < 1) {
+		std::string retStr;
+		switch ( const auto err = SSL_get_error(_ssl, ret) ) {
+			case SSL_ERROR_ZERO_RETURN:
+				retStr = "The TLS/SSL peer has closed the connection for writing by sending the close_notify alert";
+				break;
+			case SSL_ERROR_WANT_X509_LOOKUP:
+				retStr = "SSL_ERROR_WANT_X509_LOOKUP";
+				break;
+			case SSL_ERROR_SYSCALL:
+				retStr = "SSL_ERROR_SYSCALL";
+				break;
+			case SSL_ERROR_SSL:
+				retStr = "SSL_ERROR_SSL";
+				ERR_print_errors_fp(stderr);
+				break;
+			case SSL_ERROR_WANT_CLIENT_HELLO_CB:
+				retStr = "SSL_ERROR_WANT_CLIENT_HELLO_CB";
+				break;
+			case SSL_ERROR_WANT_ASYNC_JOB:
+				retStr = "SSL_ERROR_WANT_ASYNC_JOB";
+				break;
+			case SSL_ERROR_WANT_ASYNC:
+				retStr = "SSL_ERROR_WANT_ASYNC";
+				break;
+			case SSL_ERROR_WANT_CONNECT:
+			case SSL_ERROR_WANT_ACCEPT:
+				retStr = "SSL_ERROR_WANT_ACCEPT/CONNECT";
+				break;
+			case SSL_ERROR_WANT_READ:
+			case SSL_ERROR_WANT_WRITE:
+				retStr = "SSL_ERROR_WANT_WRITE/READ";
+				break;
+			default:
+				retStr = "This shouldn't have happened: " + std::to_string(err);
+		}
+		/*
+		 * If the failure is due to a verification error we can get more
+		 * information about it from SSL_get_verify_result().
+		 */
+		if ( SSL_get_verify_result(_ssl) != X509_V_OK )
+			throw std::runtime_error("Certificate verify error: " + std::string(X509_verify_cert_error_string(SSL_get_verify_result(_ssl))));
+		throw std::runtime_error("Failed to connect to the server: " + retStr);
+	}
 }
 
 void Connection::_send ( const char* message, const size_t length ) {
 	std::lock_guard<std::mutex> lock(_sendMutex);
-#ifdef __linux__
-	if ( ::send(_socket, message, length, 0) < 0 ) { throw std::runtime_error("Could not send message"); }
-#elif _WIN32
-	if(::send(_socket, message, length, 0) == SOCKET_ERROR) {
-		throw std::runtime_error("Could not send message: " + WSAGetLastError());
+
+	size_t written = 0;
+	if ( !SSL_write_ex(_ssl, message, length, &written) || written != length ) {
+		throw std::runtime_error("Could not send message");
 	}
-#endif
+
 }
 
 std::string Connection::_receive () {
 	std::string message;
 
+
 	while ( !message.ends_with(_end) ) {
 		clearBuffer();
 
-		_sizeOfPreviousMessage = recv(_socket, _buffer.get(), _bufferSize, 0);
+		if ( const auto ret = SSL_read_ex(_ssl, _buffer.get(), _bufferSize, &_sizeOfPreviousMessage); ret <= 0 ) {
+			switch ( const int err = SSL_get_error(_ssl, ret) ) {
 
-		if ( _sizeOfPreviousMessage < 0 || errno == EAGAIN || errno == EWOULDBLOCK ) {
-			throw std::runtime_error("Could not receive message from server: " + std::string(strerror(errno)));
-		}
+				case SSL_ERROR_SYSCALL:
+					if ( errno != EAGAIN && errno != EWOULDBLOCK )
+						throw std::runtime_error("client disconnected or could not receive message");
+					if ( errno == EAGAIN || errno == EWOULDBLOCK )
+						throw std::runtime_error("timeout");
+					break;
 
-		if ( _sizeOfPreviousMessage == 0 ) {
-			throw std::runtime_error("server disconnected");
+				case SSL_ERROR_ZERO_RETURN:
+				case SSL_ERROR_SSL:
+					throw std::runtime_error("server disconnected");
+
+				default:
+					ERR_print_errors_fp(stderr);
+					throw std::logic_error("unexpected error: " + std::to_string(err));
+			}
 		}
 
 		message += std::string(_buffer.get(), _sizeOfPreviousMessage);
@@ -126,12 +232,6 @@ Connection& Connection::send ( const std::string& message ) {
 	printf("SEND | %s\n", messageToSend.c_str());
 #endif
 
-	if ( _encrypted ) {
-		_secretSeal(messageToSend);
-
-		if (messageToSend.size() % 2 != 0)
-			throw std::runtime_error("Invalid message to send");
-	}
 
 	messageToSend += _end;
 
@@ -180,12 +280,6 @@ std::string Connection::receive () {
 	message = tmpMessage;
 	_messagesBuffer = messages;
 
-	if ( _encrypted ) {
-		_secretOpen(message);
-		for ( auto& messageEnc: _messagesBuffer )
-			_secretOpen(messageEnc);
-	}
-
 	if ( _messagesBuffer.empty() )
 		_moreInBuffer = false;
 	else
@@ -202,23 +296,6 @@ std::string Connection::receive () {
 			  << std::endl;
 #endif
 
-
-	if ( message.contains(_internal"publicKey:") ) {
-		const std::string publicKey = message.substr(strlen(_internal"publicKey:"));
-
-		if ( sodium_hex2bin(_remotePublicKey, crypto_box_PUBLICKEYBYTES, publicKey.c_str(), publicKey.size(), nullptr,
-		                    nullptr, nullptr) < 0 ) { throw std::runtime_error("Could not decode public key"); }
-
-		const auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
-
-		sodium_bin2hex(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2 + 1, _keyPair.publicKey, crypto_box_PUBLICKEYBYTES);
-
-		//std::cout << "public key: " << pk_base64.get() << std::endl;
-
-		send(_internal"publicKey:" + std::string(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2));
-
-		_encrypted = true;
-	}
 
 	return message;
 }
@@ -259,12 +336,6 @@ std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime 
 	message = tmpMessage;
 	_messagesBuffer = messages;
 
-	if ( _encrypted ) {
-		_secretOpen(message);
-		for ( auto& messageEnc: _messagesBuffer )
-			_secretOpen(messageEnc);
-	}
-
 	if ( _messagesBuffer.empty() )
 		_moreInBuffer = false;
 	else
@@ -281,23 +352,6 @@ std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime 
 			  << std::endl;
 #endif
 
-
-	if ( message.contains(_internal"publicKey:") ) {
-		const std::string publicKey = message.substr(strlen(_internal"publicKey:"));
-
-		if ( sodium_hex2bin(_remotePublicKey, crypto_box_PUBLICKEYBYTES, publicKey.c_str(), publicKey.size(), nullptr,
-							nullptr, nullptr) < 0 ) { throw std::runtime_error("Could not decode public key"); }
-
-		const auto pk_hex = std::make_unique<char[]>(crypto_box_PUBLICKEYBYTES * 2 + 1);
-
-		sodium_bin2hex(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2 + 1, _keyPair.publicKey, crypto_box_PUBLICKEYBYTES);
-
-		//std::cout << "public key: " << pk_base64.get() << std::endl;
-
-		send(_internal"publicKey:" + std::string(pk_hex.get(), crypto_box_PUBLICKEYBYTES * 2));
-
-		_encrypted = true;
-	}
 
 	return {message, end - start};
 }
@@ -321,7 +375,7 @@ std::string Connection::receiveData () {
 }
 
 bool Connection::isConnected () const {
-	return _encrypted;
+	return _active;
 }
 
 void Connection::resizeBuffer ( const unsigned long newSize )  {
@@ -330,13 +384,19 @@ void Connection::resizeBuffer ( const unsigned long newSize )  {
 }
 
 void Connection::close () {
-#ifdef __linux__
-	shutdown(_socket, 0);
-#elif _WIN32
-	WSACleanup();
-	shutdown(_socket, SD_SEND);
-	closesocket(_socket);
-#endif
+	/*
+	 * Repeatedly call SSL_shutdown() until the connection is fully
+	 * closed.
+	 */
+	int ret;
+	do {
+		ret = SSL_shutdown(_ssl);
+		if (ret < 0) {
+			throw std::runtime_error("Error shutting down: " + std::to_string(ret));
+		}
+	} while (ret != 1);
+
+	SSL_CTX_free(_ctx);
 
 	_active = false;
 }
@@ -347,81 +407,3 @@ Connection::~Connection () {
 }
 
 void Connection::clearBuffer () const { memset(_buffer.get(), '\0', _bufferSize); }
-
-std::vector<std::string> Connection::dnsLookup ( const std::string& domain, int ipv ) {
-	// credit to http://www.zedwood.com/article/cpp-dns-lookup-ipv4-and-ipv6
-
-	std::vector<std::string> output;
-
-	struct addrinfo hints, *res, *p;
-	int status, ai_family;
-	char ip_address[INET6_ADDRSTRLEN];
-
-	ai_family = ipv == 6 ? AF_INET6 : AF_INET; //v4 vs v6?
-	ai_family = ipv == 0 ? AF_UNSPEC : ai_family; // AF_UNSPEC (any), or chosen
-	memset(&hints, 0, sizeof hints);
-	hints.ai_family = ai_family;
-	hints.ai_socktype = SOCK_STREAM;
-
-	if ( ( status = getaddrinfo(domain.c_str(), NULL, &hints, &res) ) != 0 ) {
-		//cerr << "getaddrinfo: "<< gai_strerror(status) << endl;
-		return output;
-	}
-
-	//cout << "DNS Lookup: " << host_name << " ipv:" << ipv << endl;
-
-	for ( p = res; p != NULL; p = p->ai_next ) {
-		void* addr;
-		if ( p->ai_family == AF_INET ) { // IPv4
-			auto* ipv4 = (struct sockaddr_in*)p->ai_addr;
-			addr = &( ipv4->sin_addr );
-		}
-		else { // IPv6
-			auto* ipv6 = (struct sockaddr_in6*)p->ai_addr;
-			addr = &( ipv6->sin6_addr );
-		}
-
-		// convert the IP to a string
-		inet_ntop(p->ai_family, addr, ip_address, sizeof ip_address);
-		output.emplace_back(ip_address);
-	}
-
-	freeaddrinfo(res); // free the linked list
-
-	return output;
-}
-
-void Connection::_secretSeal ( std::string& message ) const {
-	const auto cypherText = std::make_unique<unsigned char[]>(crypto_box_SEALBYTES + message.size());
-
-	if ( crypto_box_seal(cypherText.get(), reinterpret_cast<const unsigned char*>(message.data()), message.size(),
-	                     _remotePublicKey) < 0 )
-		throw std::runtime_error("Could not encrypt message");
-
-	const auto messageHex = std::make_unique<unsigned char[]>(( crypto_box_SEALBYTES + message.size() ) * 2 + 1);
-
-	sodium_bin2hex(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2 + 1,
-	               cypherText.get(), crypto_box_SEALBYTES + message.size());
-
-	message = std::string(reinterpret_cast<char*>(messageHex.get()), ( crypto_box_SEALBYTES + message.size() ) * 2);
-}
-
-void Connection::_secretOpen ( std::string& message ) const {
-
-	if (message.length() % 2 != 0)
-		throw std::runtime_error("Invalid message to decrypt: " + message);
-
-	const auto cypherTextBin = std::make_unique<unsigned char[]>(message.size() / 2);
-
-	if ( sodium_hex2bin(cypherTextBin.get(), message.size() / 2, reinterpret_cast<const char*>(message.data()),
-	                    message.size(), nullptr, nullptr, nullptr) < 0 )
-		throw std::runtime_error("Could not decode message: " + message);
-
-	const auto decrypted = std::make_unique<unsigned char[]>(message.size() / 2 - crypto_box_SEALBYTES);
-
-	if ( crypto_box_seal_open(decrypted.get(), cypherTextBin.get(), message.size() / 2, _keyPair.publicKey,
-	                          _keyPair.secretKey) < 0 )
-		throw std::runtime_error("Could not decrypt message");
-
-	message = std::string(reinterpret_cast<char*>(decrypted.get()), message.size() / 2 - crypto_box_SEALBYTES);
-}

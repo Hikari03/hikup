@@ -10,7 +10,7 @@ httpDisplayInBrowser = true # if you want to default to '?view=yes' when this pa
 hostname = "example.org" # external hostname only for printing http links
 
 [syncTargets]
-targets = [ # array of quadruplets of display name, address, remote user, remote pass
-#    { name = "exampleName", address = "example.org", user = "admin", pass = "admin"}
+targets = [ # array of quintuplets of display name, address, remote user, remote pass, if we want cert verification
+#    { name = "exampleName", address = "example.org", user = "admin", pass = "admin", tlsCertVerify = false }
 ]
 syncPeriod = 30 # in seconds

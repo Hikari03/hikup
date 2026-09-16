@@ -4,6 +4,7 @@
 #include <sodium.h>
 #include <string>
 #include <vector>
+#include <openssl/evp.h>
 
 #include "Color.hpp"
 #include "../shared/utils.hpp"
@@ -54,12 +55,12 @@ inline std::string colorize ( const std::string& text, Color color ) {
 }
 
 
-inline std::string computeHash ( std::ifstream& file, const size_t allocationSpace, const size_t fileSize, bool quiet = false ) {
+inline std::string computeHash ( std::ifstream& file, const size_t allocationSpace, const size_t fileSize, const bool quiet = false ) {
 	file.seekg(0);
 	const auto buffer = std::make_unique<char[]>(allocationSpace);
-	unsigned char hash[crypto_generichash_BYTES];
-	crypto_generichash_state state;
-	crypto_generichash_init(&state, nullptr, 0, sizeof hash);
+
+	EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
+	EVP_DigestInit_ex(mdctx, EVP_blake2s256(), nullptr);
 
 	while ( true ) {
 		file.read(buffer.get(), allocationSpace);
@@ -69,7 +70,7 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 
 
 		// Update hash with the bytes read
-		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(buffer.get()), file.gcount());
+		EVP_DigestUpdate(mdctx, buffer.get(), file.gcount());
 
 
 		if ( file.eof() )
@@ -84,7 +85,9 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 		}
 	}
 
-	crypto_generichash_final(&state, hash, sizeof hash);
+	const auto hash = std::make_unique<unsigned char[]>(EVP_MAX_MD_SIZE);
+	unsigned int hashSize = EVP_MAX_MD_SIZE;
+	EVP_DigestFinal_ex(mdctx, hash.get(), &hashSize);
 
 	if ( !quiet ) {
 		std::cout << "\r" << colorize("Hashing file... ", Color::BLUE) + colorize(
@@ -94,7 +97,7 @@ inline std::string computeHash ( std::ifstream& file, const size_t allocationSpa
 	file.clear();
 	file.seekg(0);
 
-	return binToHex(hash, sizeof hash);
+	return bytesToHex(hash.get(), hashSize);
 }
 
 inline std::vector<std::string> cutStringIntoVector(std::string_view str) {

@@ -14,7 +14,8 @@ void printHelp ( const std::string& argv0 ) {
                 "If server has HTTP server, you will get link for download.\n"
                 "You can append '?view=yes' to the link to view the file in browser.\n\n"
                 "You can also replace the file/hash with `-` and pass space/new-line separated list to standard input\n\n"
-                "add `q` into argument with up, down, rm for silent run. i.e. qup" << std::endl;
+                "add `q` into argument with up, down, rm for silent run. i.e. qup\n"
+                "add `v` to force TLS to verify server certificate" << std::endl;
 }
 
 int start ( int argc, char* argv[] ) {
@@ -24,6 +25,8 @@ int start ( int argc, char* argv[] ) {
     }
 
     auto command = Command::resolveCommand(argv[1]);
+
+    bool SSLVerifyCert = command.contains(Command::Type::SSL_VERIFY_CERT);
 
     const auto quiet = command.contains(Command::Type::QUIET);
 
@@ -63,7 +66,7 @@ int start ( int argc, char* argv[] ) {
 
         auto files = cutStringIntoVector(fileString);
 
-        connection.connectToServer(argv[3], 6998);
+        connection.connectToServer(argv[3], 6998, SSLVerifyCert);
 
         return Batch::autoResolve(command, connection, files, quiet);
     }
@@ -84,7 +87,7 @@ int start ( int argc, char* argv[] ) {
 
 
             const auto freeMem = getFreeMemory();
-            auto toAllocate = std::min(freeMem / 4, static_cast<unsigned long>(fileSize / 16));
+            auto toAllocate = std::min(freeMem / 4, static_cast<unsigned long>(fileSize / 4));
             if ( toAllocate < freeMem / 2 )
                 toAllocate = std::min(freeMem, static_cast<unsigned long>(fileSize));
 
@@ -104,7 +107,7 @@ int start ( int argc, char* argv[] ) {
             std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
         }
 
-        connection.connectToServer(serverAddr, 6998);
+        connection.connectToServer(serverAddr, 6998, SSLVerifyCert);
 
         if ( !quiet ) {
             std::cout << colorize("Connected to server", Color::GREEN) << std::endl;

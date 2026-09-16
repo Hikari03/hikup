@@ -7,7 +7,7 @@
 ### File Sharing Made Easy
 
 - **File Management**: Effortlessly upload, download, and remove files with just one command.
-- **Secure Transfer**: All data transfers between the client and server are encrypted to ensure data integrity and privacy. ***( for the moment susceptible to man-in-the-middle attacks)***
+- **Secure Transfer**: All data transfers between the client and server are encrypted using QUIC to ensure data integrity and privacy. (man-in-the-middle attack not possible with installed certificates)
 - **File Sharing in Three Simple Steps**:
     1. Upload the desired file to the server and receive a unique hash and HTTP link.
     2. Share the generated hash or link with designated recipients.
@@ -25,6 +25,7 @@
 - `hikup rm <file> <server-address>`: Remove a file.
 - `hikup ls <user> <pass> <server-address>`: List all files (requires authentication).
 - add `q` into first argument for quiet run: like qup, qdown, ...
+- add `v` to force TLS to verify server certificate
 
 > [!NOTE]
 > When an operation with more files at once is desired, pipe space or new-line separated list of files/hashes into program and in arguments enter `-` in the normal place.
@@ -32,7 +33,7 @@
 
 ## Dependencies
 ### Shared
-- `cmake`, `libsodium`, `g++` with c++23 support
+- `cmake`, `OpenSSL`, `g++` with c++23 support
 
 ### Server
 - `docker`, `docker-compose` (optional)
@@ -56,15 +57,22 @@ cmake --build build --target hikup -j $(nproc)
 ### Settings
 - All available runtime settings are in `settings/settings.toml` with descriptions.
 
+### Certificate use
+- All certificates are stored in `auth/`
+- Expected name for chain certificate is `server_fullchain.pem` and for private key `server_key.pem`.
+- When no certificate or key is present, server will generate its own CA and certificate.
+- If this happens, the hostname declared in settings will be used. You will also need to add the `ca_cert.pem` as your trusted CA.
+
 ### Sync
 - Sync files between servers in declared periods.
 - To use this, add target in settings in `[syncTargets]` section.
+- If certificate verify is desired and custom CA certificate was used, place it into `trusted-certs/` directory. 
 
 > [!WARNING]
 >**The declared target will be the master in one case**: if you uploaded a removed file and that removal synced. Which means if you again upload this file on non-master, your master will remove it on the next sync.
 
 ### Default Ports
-- **Hikup protocol**: 6998
+- **Hikup protocol**: 6998/udp
   - If you want to change it, you can do so in `server/ConnectionServer.cpp` and `src/main.cpp`
 - **HTTP protocol**: 6997
   - Can be changed in `settings/settings.json`
@@ -101,6 +109,9 @@ cmake --build build --target hikup-server -j $(nproc)
 ``` bash
 ./hikup-server
 ```
+
+## Static builds
+Use `*-static`flavours of scripts for this. Ensure that you have static library of OpenSSL.
 
 # Acknowledgements
 - [libsodium](https://github.com/jedisct1/libsodium) for encryption

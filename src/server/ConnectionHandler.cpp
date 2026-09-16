@@ -5,6 +5,7 @@
 #include <fstream>
 #include <set>
 #include <utility>
+#include <openssl/evp.h>
 
 #include "HTTPFileServer.hpp"
 #include "utils.hpp"
@@ -111,9 +112,9 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 	std::string message;
 	long long sizeWritten = 0;
 
-	unsigned char hash[crypto_generichash_BYTES];
-	crypto_generichash_state state;
-	crypto_generichash_init(&state, nullptr, 0, sizeof hash);
+	EVP_MD_CTX *mdctx;
+	mdctx = EVP_MD_CTX_new();
+	EVP_DigestInit_ex(mdctx, EVP_blake2s256(), nullptr);
 
 	while ( true ) {
 		try { message = connection.receive(); }
@@ -133,7 +134,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
 		connection.sendInternal("confirm");
 
-		crypto_generichash_update(&state, reinterpret_cast<const unsigned char*>(message.data()), message.size());
+		EVP_DigestUpdate(mdctx, message.data(), message.size());
 
 		Utils::log(
 			std::string("\r") + "main: " + humanReadableSize(sizeWritten) + " / " + humanReadableSize(fileSize) +
@@ -142,9 +143,12 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 	std::cout << std::endl;
 	file.close();
 
-	crypto_generichash_final(&state, hash, sizeof hash);
+	auto hash = std::make_unique<unsigned char[]>(EVP_MAX_MD_SIZE);
+	unsigned int hashSize = EVP_MAX_MD_SIZE;
 
-	auto hashString = binToHex(hash, sizeof hash);
+	EVP_DigestFinal_ex(mdctx, hash.get(), &hashSize);
+
+	auto hashString = bytesToHex(hash.get(), hashSize);
 
 	if ( hashFromClient != hashString ) {
 		std::filesystem::remove(_path);
@@ -261,7 +265,7 @@ void ConnectionHandler::_removeOnSyncedTargets ( const std::string& hash ) {
 	for ( const auto& target: _settings.syncTargets ) {
 		Connection connection;
 
-		try { connection.connectToServer(target.targetAddress, 6998, 5); }
+		try { connection.connectToServer(target.targetAddress, 6998, target.tlsCertVerify); }
 		catch ( ... ) {
 			Utils::log("removeOnSyncedTargets: Could not connect to remote");
 			continue;
@@ -496,7 +500,7 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 	// send command type and authenticate
 	std::lock_guard lock(_syncMutex);
 	Connection connection;
-	connection.connectToServer(target.targetAddress, 6998);
+	connection.connectToServer(target.targetAddress, 6998, target.tlsCertVerify);
 
 	connection.sendInternal("command:SYNC")
 		.sendInternal("user:" + target.targetUser)
