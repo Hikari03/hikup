@@ -17,6 +17,7 @@ Settings::Settings ( const Settings& other ) {
     httpProtocol = other.httpProtocol;
     hostname = other.hostname;
     httpDisplayInBrowser = other.httpDisplayInBrowser;
+    hikupPort = other.hikupPort;
     syncTargets = other.syncTargets;
     syncPeriod = other.syncPeriod;
 }
@@ -45,6 +46,7 @@ Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
 
     result.wantHttp = settings["server"]["wantHttpServer"].as_boolean()->value_or(false);
     result.hostname = settings["server"]["hostname"].as_string()->value_or("<NOT-DEFINED>");
+    result.hikupPort = settings["server"]["hikupPort"].as_integer()->value_or(6998);
 
     if ( result.wantHttp ) {
         result.httpAddress = settings["server"]["httpAddress"].as_string()->value_or("http://0.0.0.0:6997");
@@ -81,6 +83,7 @@ std::string Settings::toString () const {
     return std::string("settings: \n")
             + "  wantHttpServer: " + ( wantHttp ? "true" : "false" ) + "\n"
             + "  hostname: " + hostname + "\n"
+            + "  hikupPort: " + std::to_string(hikupPort) + "\n"
             + "  httpAddress: " + httpAddress + "\n"
             + "  httpProtocol: " + httpProtocol + "\n"
             + "auth: \n"

@@ -55,15 +55,16 @@ inline std::string colorize ( const std::string& text, Color color ) {
 }
 
 
-inline std::string computeHash ( std::ifstream& file, const size_t allocationSpace, const size_t fileSize, const bool quiet = false ) {
+inline std::string computeHash ( std::ifstream& file, const size_t fileSize, const bool quiet = false ) {
 	file.seekg(0);
-	const auto buffer = std::make_unique<char[]>(allocationSpace);
+	const size_t hashChunkSize = 8 * 1024 * 1024;
+	const auto buffer = std::make_unique<char[]>(hashChunkSize);
 
 	EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
 	EVP_DigestInit_ex(mdctx, EVP_blake2s256(), nullptr);
 
 	while ( true ) {
-		file.read(buffer.get(), allocationSpace);
+		file.read(buffer.get(), hashChunkSize);
 
 		if ( file.gcount() == 0 )
 			break;

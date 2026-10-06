@@ -49,7 +49,7 @@ std::string HTTPFileServer::createSymlinkFor( const std::filesystem::path & file
 	const auto linkPath = std::filesystem::current_path() / "links" / fileName;
 
 	if ( std::filesystem::exists(linkPath) )
-		return "file already exists, this shouldn't happen";
+		return fileName;
 
 	std::filesystem::create_symlink(file, linkPath);
 	return fileName;

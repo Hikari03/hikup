@@ -102,14 +102,14 @@ int main () {
 	SSL_CTX_set_alpn_select_cb(ctx, select_alpn, NULL);
 
 
-	const int serverSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	const int serverSocket = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
 
 	if ( serverSocket < 0 ) {
 		std::cerr << "main: couldn't init socket" << std::endl;
 		return 1;
 	}
 
-	sockaddr_in serverAddress = {AF_INET, htons(6998), {INADDR_ANY}, {0}};
+	// sockaddr_in serverAddress = {AF_INET, htons(6998), {INADDR_ANY}, {0}};
 
 	// Allow both IPv4 and IPv6 on this one socket
 	int no = 0;
@@ -124,9 +124,9 @@ int main () {
 	struct sockaddr_in6 addr{};
 	addr.sin6_family = AF_INET6;
 	addr.sin6_addr = in6addr_any; // binds to ::  (all interfaces, v4 + v6)
-	addr.sin6_port = htons(serverSocket);
+	addr.sin6_port = htons(settings.hikupPort);
 
-	if ( bind(serverSocket, reinterpret_cast<sockaddr*>(&serverAddress), sizeof( serverAddress )) < 0 ) {
+	if ( bind(serverSocket, reinterpret_cast<sockaddr*>(&addr), sizeof( addr )) < 0 ) {
 		std::cerr << "main: could not bind server socket" << std::endl;
 		BIO_closesocket(serverSocket);
 		return 1;

@@ -86,7 +86,8 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
 	const auto oldFileName = fileName;
 
-	const auto freeRam = std::min(getFreeMemory() / 4, static_cast<unsigned long>(fileSize / 16));
+	const auto freeRamLimit = 64 * 1024 * 1024; // 64 MB
+	const auto freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4), static_cast<unsigned long>(4 * 1024 * 1024), static_cast<unsigned long>(freeRamLimit));
 
 	connection.resizeBuffer(freeRam);
 
@@ -96,8 +97,9 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 	std::filesystem::path _path = std::filesystem::current_path() / "storage" / ( fileName + '.' + hashFromClient );
 
 	if ( std::filesystem::exists(_path) ) {
+		const auto HTTPLinkString = HTTPFileServer::createSymlinkFor(_path);
 		connection.sendInternal("file already exists");
-		connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + hashFromClient);
+		connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + HTTPLinkString);
 		return;
 	}
 
@@ -107,46 +109,43 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
 	std::ofstream file(_path, std::ios::binary);
 
-	Utils::log("receiveFile: starting download of size: " + std::to_string(fileSize));
+	std::cout << _path << std::endl;
 
-	std::string message;
-	long long sizeWritten = 0;
+	Utils::log("receiveFile: starting download of size: " + std::to_string(fileSize));
 
 	EVP_MD_CTX *mdctx;
 	mdctx = EVP_MD_CTX_new();
 	EVP_DigestInit_ex(mdctx, EVP_blake2s256(), nullptr);
 
-	while ( true ) {
-		try { message = connection.receive(); }
-		catch ( const std::exception& e ) {
-			std::cerr << "receiveFile: error receiving message: " << e.what() << std::endl;
-			file.close();
-			std::filesystem::remove(_path);
-			connection.sendInternal("fail");
-			return;
-		}
+    bool success = false;
+    try {
+        connection.receiveExact(fileSize, [&file, mdctx](const char* data, size_t size) {
+            file.write(data, size);
+            EVP_DigestUpdate(mdctx, data, size);
+        });
+        success = true;
+    }
+    catch ( const std::exception& e ) {
+        std::cerr << "receiveFile: error receiving message: " << e.what() << std::endl;
+        file.close();
+        std::filesystem::remove(_path);
+        EVP_MD_CTX_free(mdctx);
+        return;
+    }
 
-		if ( message.starts_with(_internal"DONE") )
-			break;
-
-		file.write(message.data(), message.size());
-		sizeWritten += message.size();
-
-		connection.sendInternal("confirm");
-
-		EVP_DigestUpdate(mdctx, message.data(), message.size());
-
-		Utils::log(
-			std::string("\r") + "main: " + humanReadableSize(sizeWritten) + " / " + humanReadableSize(fileSize) +
-			" bytes written", false);
-	}
-	std::cout << std::endl;
 	file.close();
+
+    if (!success) {
+        std::filesystem::remove(_path);
+        EVP_MD_CTX_free(mdctx);
+        return;
+    }
 
 	auto hash = std::make_unique<unsigned char[]>(EVP_MAX_MD_SIZE);
 	unsigned int hashSize = EVP_MAX_MD_SIZE;
 
 	EVP_DigestFinal_ex(mdctx, hash.get(), &hashSize);
+	EVP_MD_CTX_free(mdctx);
 
 	auto hashString = bytesToHex(hash.get(), hashSize);
 
@@ -185,6 +184,8 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 		return;
 	}
 
+    const auto fileSize = std::filesystem::file_size(fileName);
+
 	if ( !_readyFiles.list().contains(hash) ) {
 		Utils::log("sendFile: file is being uploaded");
 		connection.sendInternal("File is being uploaded, try again later");
@@ -199,13 +200,12 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 		return;
 	}
 
-	const auto freeRam = getFreeMemory() / 4;
+	const auto freeRamLimit = 64 * 1024 * 1024; // 64 MB
+	const auto freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4), static_cast<unsigned long>(4 * 1024 * 1024), static_cast<unsigned long>(freeRamLimit));
 
 	connection.sendInternal("OK");
 
-	const auto fileSize = std::filesystem::file_size(fileName);
-
-	size_t chunkSize = 2 * 1024 * 1024;
+	size_t chunkSize = 4 * 1024 * 1024;
 	auto buffer = std::make_unique<char[]>(chunkSize);
 
 	connection.sendInternal(std::to_string(fileSize));
@@ -224,39 +224,39 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 
 	while ( true ) {
 		file.read(buffer.get(), chunkSize);
+        auto bytesRead = file.gcount();
+        if (bytesRead == 0) break;
 
 		const auto startUploadTime = std::chrono::high_resolution_clock::now();
-		connection.send(std::string(buffer.get(), file.gcount()));
+		connection.sendRaw(buffer.get(), bytesRead);
 		const auto endUploadTime = std::chrono::high_resolution_clock::now();
 
 		std::chrono::duration<double> duration = endUploadTime - startUploadTime;
 
-		sizeRead += file.gcount();
-
-		if ( connection.receiveInternal() != "confirm" )
-			throw std::runtime_error("sendFile: client did not confirm the chunk");
+		sizeRead += bytesRead;
 
 		if ( sizeRead == static_cast<unsigned long long>(fileSize) )
 			break;
 
 		// adjust chunk size based on duration
-		if ( duration.count() > 1.4 ) {
-			// decrease chunkSize by 2%, ensure integer rounding
-			chunkSize = static_cast<int>(chunkSize * 0.75);
+		if ( duration.count() > 1.0 ) {
+			// decrease chunkSize by 25%
+			chunkSize = static_cast<size_t>(chunkSize * 0.75);
+			if (chunkSize < 1024 * 1024) chunkSize = 1024 * 1024;
 
 			buffer = std::make_unique<char[]>(chunkSize);
 		}
-		else if ( duration.count() < 0.3 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<int>(chunkSize * 2);
+		else if ( duration.count() < 0.2 && freeRam >= chunkSize * 2 ) {
+			chunkSize = static_cast<size_t>(chunkSize * 2);
 			buffer = std::make_unique<char[]>(chunkSize);
 		}
-		else if ( duration.count() < 0.6 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<int>(chunkSize * 1.25);
+		else if ( duration.count() < 0.4 && freeRam >= chunkSize * 2 ) {
+			chunkSize = static_cast<size_t>(chunkSize * 1.25);
 			buffer = std::make_unique<char[]>(chunkSize);
 		}
 	}
 
-	connection.sendInternal("DONE");
+	connection.send(""); // Protocol termination
 }
 
 void ConnectionHandler::_removeOnSyncedTargets ( const std::string& hash ) {
@@ -379,48 +379,47 @@ void ConnectionHandler::_sendFileInSync ( T& connection, const std::string& file
 	}
 
 	std::ifstream file(_path, std::ios::binary);
-	size_t chunkSize = 2 * 1024 * 1024;
+	size_t chunkSize = 4 * 1024 * 1024;
 	auto buffer = std::make_unique<char[]>(chunkSize);
 	size_t sizeRead = 0;
-	const auto freeRam = getFreeMemory() / 4;
+	const auto freeRamLimit = 64 * 1024 * 1024; // 64 MB
+	const auto freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4), static_cast<unsigned long>(4 * 1024 * 1024), static_cast<unsigned long>(freeRamLimit));
 
 	while ( true ) {
 		file.read(buffer.get(), chunkSize);
+        auto bytesRead = file.gcount();
+        if (bytesRead == 0) break;
 
 		const auto startUploadTime = std::chrono::high_resolution_clock::now();
-		connection.send(std::string(buffer.get(), file.gcount()));
+		connection.sendRaw(buffer.get(), bytesRead);
 		const auto endUploadTime = std::chrono::high_resolution_clock::now();
 
 		std::chrono::duration<double> duration = endUploadTime - startUploadTime;
 
-		sizeRead += file.gcount();
-
-		if ( connection.receiveInternal() != "confirm" )
-			throw std::runtime_error("sendFile: client did not confirm the chunk");
+		sizeRead += bytesRead;
 
 		if ( sizeRead == static_cast<unsigned long long>(fileSize) )
 			break;
 
 		// adjust chunk size based on duration
-		if ( duration.count() > 1.4 ) {
-			// decrease chunkSize by 2%, ensure integer rounding
-			chunkSize = static_cast<int>(chunkSize * 0.75);
+		if ( duration.count() > 1.0 ) {
+			// decrease chunkSize by 25%
+			chunkSize = static_cast<size_t>(chunkSize * 0.75);
+			if (chunkSize < 1024 * 1024) chunkSize = 1024 * 1024;
 
 			buffer = std::make_unique<char[]>(chunkSize);
 		}
-		else if ( duration.count() < 0.3 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<int>(chunkSize * 2);
+		else if ( duration.count() < 0.2 && freeRam >= chunkSize * 2 ) {
+			chunkSize = static_cast<size_t>(chunkSize * 2);
 			buffer = std::make_unique<char[]>(chunkSize);
 		}
-		else if ( duration.count() < 0.6 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<int>(chunkSize * 1.25);
+		else if ( duration.count() < 0.4 && freeRam >= chunkSize * 2 ) {
+			chunkSize = static_cast<size_t>(chunkSize * 1.25);
 			buffer = std::make_unique<char[]>(chunkSize);
 		}
 	}
 
-	connection.sendInternal("DONE");
-
-	if ( auto message = connection.receiveInternal(); message != "OK" ) { Utils::elog(connection.receiveInternal()); }
+	connection.send(""); // Protocol termination
 }
 
 // set substraction
@@ -476,7 +475,7 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
 	const auto toSend = localHashes / remoteHashes;
 
 	// Again, master is first to send missing files
-	for ( size_t i = 0; i < toGet.size(); i-- ) {
+	for ( size_t i = 0; i < toGet.size(); ++i ) {
 		Utils::log(
 			"ConnectionHandler::_syncAsSlave: getting file " + std::to_string(i + 1) + "/" + std::to_string(
 				toGet.size()));
@@ -500,7 +499,17 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 	// send command type and authenticate
 	std::lock_guard lock(_syncMutex);
 	Connection connection;
-	connection.connectToServer(target.targetAddress, 6998, target.tlsCertVerify);
+
+	std::string address = target.targetAddress;
+	int port = 6998;
+	if ( size_t pos = address.find_last_of(':'); pos != std::string::npos ) {
+		try {
+			port = std::stoi(address.substr(pos + 1));
+			address = address.substr(0, pos);
+		} catch (...) {}
+	}
+
+	connection.connectToServer(address, port, target.tlsCertVerify);
 
 	connection.sendInternal("command:SYNC")
 		.sendInternal("user:" + target.targetUser)

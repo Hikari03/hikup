@@ -20,10 +20,10 @@
 
 ### Client Commands
 - `hikup`: Display help information about the commands.
-- `hikup up <file> <server-address>`: Upload a file.
-- `hikup down <file> <server-address>`: Download a file.
-- `hikup rm <file> <server-address>`: Remove a file.
-- `hikup ls <user> <pass> <server-address>`: List all files (requires authentication).
+- `hikup up <file> <server-address>[:port]`: Upload a file.
+- `hikup down <file> <server-address>[:port]`: Download a file.
+- `hikup rm <file> <server-address>[:port]`: Remove a file.
+- `hikup ls <user> <pass> <server-address>[:port]`: List all files (requires authentication).
 - add `q` into first argument for quiet run: like qup, qdown, ...
 - add `v` to force TLS to verify server certificate
 
@@ -72,10 +72,10 @@ cmake --build build --target hikup -j $(nproc)
 >**The declared target will be the master in one case**: if you uploaded a removed file and that removal synced. Which means if you again upload this file on non-master, your master will remove it on the next sync.
 
 ### Default Ports
-- **Hikup protocol**: 6998/udp
-  - If you want to change it, you can do so in `server/ConnectionServer.cpp` and `src/main.cpp`
-- **HTTP protocol**: 6997
-  - Can be changed in `settings/settings.json`
+- **Hikup protocol**: 6998/udp (default)
+  - Can be changed in `settings/settings.toml`
+- **HTTP protocol**: 6997 (default)
+  - Can be changed in `settings/settings.toml`
 
 > [!NOTE]
 > When using docker, external ports can be mapped in `docker-compose.yaml`

@@ -37,8 +37,14 @@ std::string humanReadableSpeed ( double speed ) {
 
 unsigned long getFreeMemory () {
     struct sysinfo memInfo{};
-    sysinfo(&memInfo);
-    return memInfo.bufferram + memInfo.freeram;
+    if (sysinfo(&memInfo) != 0) return 0;
+    unsigned long totalFree = memInfo.freeram + memInfo.bufferram + memInfo.totalhigh;
+#ifdef __linux__
+    // On Linux, we should also consider cached memory if possible, 
+    // but sysinfo doesn't directly provide 'cached'.
+    // However, freeram + bufferram is a better start than just freeram.
+#endif
+    return totalFree * memInfo.mem_unit;
 }
 
 std::string padStringToSize ( const std::string& str, const unsigned totalLength ) {

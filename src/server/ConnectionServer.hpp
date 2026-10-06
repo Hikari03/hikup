@@ -3,6 +3,7 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <functional>
 
 #include "ClientInfo.hpp"
 
@@ -26,12 +27,17 @@ public:
 	void init ();
 
 	void send ( const std::string& message ) const;
+	void send ( const char* data, size_t length ) const;
+	void sendRaw ( const char* data, size_t length ) const;
 
 	void sendInternal ( const std::string& message ) const;
 
 	void sendData ( const std::string& message ) const;
+	void sendData ( const char* data, size_t length ) const;
 
 	std::string receive ();
+    void receiveStream ( const std::function<void(const char*, size_t)>& callback );
+	void receiveExact ( size_t length, const std::function<void(const char*, size_t)>& callback );
 
 	std::string receiveInternal ();
 

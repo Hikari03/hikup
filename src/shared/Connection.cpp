@@ -189,19 +189,18 @@ void Connection::_send ( const char* message, const size_t length ) {
 	if ( !SSL_write_ex(_ssl, message, length, &written) || written != length ) {
 		throw std::runtime_error("Could not send message");
 	}
-
 }
 
 std::string Connection::_receive () {
 	std::string message;
+	message.reserve(_bufferSize);
 
-
-	while ( !message.ends_with(_end) ) {
-		clearBuffer();
-
+	while ( true ) {
 		if ( const auto ret = SSL_read_ex(_ssl, _buffer.get(), _bufferSize, &_sizeOfPreviousMessage); ret <= 0 ) {
 			switch ( const int err = SSL_get_error(_ssl, ret) ) {
-
+				case SSL_ERROR_WANT_READ:
+				case SSL_ERROR_WANT_WRITE:
+					continue;
 				case SSL_ERROR_SYSCALL:
 					if ( errno != EAGAIN && errno != EWOULDBLOCK )
 						throw std::runtime_error("client disconnected or could not receive message");
@@ -219,32 +218,45 @@ std::string Connection::_receive () {
 			}
 		}
 
-		message += std::string(_buffer.get(), _sizeOfPreviousMessage);
+		message.append(_buffer.get(), _sizeOfPreviousMessage);
+		if (message.size() >= strlen(_end) && memcmp(message.data() + message.size() - strlen(_end), _end, strlen(_end)) == 0) {
+			break;
+		}
 	}
 
 	return message;
 }
 
 Connection& Connection::send ( const std::string& message ) {
-	auto messageToSend = message;
+    return send(message.data(), message.size());
+}
 
+Connection& Connection::send ( const char* data, size_t length ) {
 #ifdef HIKUP_CONN_DEBUG
-	printf("SEND | %s\n", messageToSend.c_str());
+	printf("SEND | %.*s\n", (int)std::min(length, (size_t)100), data);
 #endif
 
-
-	messageToSend += _end;
-
-	//std::cout << "\nSEND | " << messageToSend << std::endl;
-
-	_send(messageToSend.data(), messageToSend.size());
+	_send(data, length);
+	_send(_end, strlen(_end));
 
 	return *this;
 }
 
-Connection& Connection::sendData ( const std::string& message ) { return send(_data + message); }
+Connection& Connection::sendRaw ( const char* data, size_t length ) {
+    _send(data, length);
+    return *this;
+}
 
-Connection& Connection::sendInternal ( const std::string& message ) { return send(_internal + message); }
+Connection& Connection::sendData ( const std::string& message ) { return sendData(message.data(), message.size()); }
+Connection& Connection::sendData ( const char* data, size_t length ) {
+    _send(_data, strlen(_data));
+    return send(data, length);
+}
+
+Connection& Connection::sendInternal ( const std::string& message ) {
+    _send(_internal, strlen(_internal));
+    return send(message.data(), message.size());
+}
 
 std::string Connection::receive () {
 
@@ -258,23 +270,21 @@ std::string Connection::receive () {
 
 	auto message = _receive();
 
-	// remove the _end string
-
 	std::vector<std::string> messages;
 	std::string tmpMessage;
 	size_t sPos = 0, ePos = 0;
 	bool first = true;
+	const size_t endLen = strlen(_end);
 
 	while ( ( ePos = message.find(_end, sPos) ) != std::string::npos ) {
 		if ( first ) {
-			tmpMessage = message.substr(sPos, ePos-sPos);
+			tmpMessage = message.substr(sPos, ePos - sPos);
 			first = false;
 		}
 		else
-			messages.push_back(message.substr(sPos, ePos-sPos));
+			messages.push_back(message.substr(sPos, ePos - sPos));
 
-
-		sPos = ePos + strlen(_end);
+		sPos = ePos + endLen;
 	}
 
 	message = tmpMessage;
@@ -298,6 +308,97 @@ std::string Connection::receive () {
 
 
 	return message;
+}
+
+void Connection::receiveStream ( const std::function<void(const char*, size_t)>& callback ) {
+    if ( _moreInBuffer ) {
+        for ( const auto& msg : _messagesBuffer ) {
+            callback(msg.data(), msg.size());
+        }
+        _messagesBuffer.clear();
+        _moreInBuffer = false;
+    }
+
+    while ( true ) {
+        size_t nRead = 0;
+        if ( const auto ret = SSL_read_ex(_ssl, _buffer.get(), _bufferSize, &nRead); ret <= 0 ) {
+            switch ( const int err = SSL_get_error(_ssl, ret) ) {
+                case SSL_ERROR_WANT_READ:
+                case SSL_ERROR_WANT_WRITE:
+                    continue;
+                case SSL_ERROR_SYSCALL:
+                    if ( errno != EAGAIN && errno != EWOULDBLOCK )
+                        throw std::runtime_error("client disconnected or could not receive message");
+                    if ( errno == EAGAIN || errno == EWOULDBLOCK )
+                        throw std::runtime_error("timeout");
+                    break;
+                case SSL_ERROR_ZERO_RETURN:
+                case SSL_ERROR_SSL:
+                    throw std::runtime_error("server disconnected");
+                default:
+                    ERR_print_errors_fp(stderr);
+                    throw std::logic_error("unexpected error: " + std::to_string(err));
+            }
+        }
+
+        // Check if the _end marker is at the end of what we just read
+        const size_t endLen = strlen(_end);
+        if (nRead >= endLen && memcmp(_buffer.get() + nRead - endLen, _end, endLen) == 0) {
+            if (nRead > endLen) {
+                callback(_buffer.get(), nRead - endLen);
+            }
+            break;
+        }
+        callback(_buffer.get(), nRead);
+    }
+}
+
+void Connection::receiveExact ( size_t length, const std::function<void(const char*, size_t)>& callback ) {
+    size_t totalReceived = 0;
+
+    if ( _moreInBuffer ) {
+        for ( auto it = _messagesBuffer.begin(); it != _messagesBuffer.end(); ) {
+            size_t remaining = length - totalReceived;
+            if ( it->size() <= remaining ) {
+                callback(it->data(), it->size());
+                totalReceived += it->size();
+                it = _messagesBuffer.erase(it);
+            } else {
+                callback(it->data(), remaining);
+                totalReceived += remaining;
+                *it = it->substr(remaining);
+                break;
+            }
+        }
+        if ( _messagesBuffer.empty() )
+            _moreInBuffer = false;
+    }
+
+    while ( totalReceived < length ) {
+        size_t nRead = 0;
+        size_t toRead = std::min(static_cast<size_t>(_bufferSize), length - totalReceived);
+        if ( const auto ret = SSL_read_ex(_ssl, _buffer.get(), toRead, &nRead); ret <= 0 ) {
+            switch ( const int err = SSL_get_error(_ssl, ret) ) {
+                case SSL_ERROR_WANT_READ:
+                case SSL_ERROR_WANT_WRITE:
+                    continue;
+                case SSL_ERROR_SYSCALL:
+                    if ( errno != EAGAIN && errno != EWOULDBLOCK )
+                        throw std::runtime_error("client disconnected or could not receive message");
+                    if ( errno == EAGAIN || errno == EWOULDBLOCK )
+                        throw std::runtime_error("timeout");
+                    break;
+                case SSL_ERROR_ZERO_RETURN:
+                case SSL_ERROR_SSL:
+                    throw std::runtime_error("server disconnected");
+                default:
+                    ERR_print_errors_fp(stderr);
+                    throw std::logic_error("unexpected error: " + std::to_string(err));
+            }
+        }
+        callback(_buffer.get(), nRead);
+        totalReceived += nRead;
+    }
 }
 
 std::tuple<std::string, std::chrono::duration<double>> Connection::receiveWTime () {
@@ -379,8 +480,10 @@ bool Connection::isConnected () const {
 }
 
 void Connection::resizeBuffer ( const unsigned long newSize )  {
-	_buffer = std::make_unique<char[]>(newSize);
-	_bufferSize = newSize;
+	const unsigned long maxSize = 64 * 1024 * 1024;
+	const unsigned long finalSize = std::min(newSize, maxSize);
+	_buffer = std::make_unique<char[]>(finalSize);
+	_bufferSize = finalSize;
 }
 
 void Connection::close () {

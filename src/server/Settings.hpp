@@ -20,6 +20,8 @@ struct Settings {
     std::string httpProtocol;
     bool httpDisplayInBrowser;
 
+    int hikupPort;
+
     std::vector<SyncTarget> syncTargets;
     int syncPeriod;
 

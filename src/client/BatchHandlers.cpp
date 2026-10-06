@@ -44,17 +44,10 @@ int Batch::upload ( Connection& connection, const std::vector<std::string>& file
 
 		auto [file, fileSize, fileName] = resolveFile(fileString);
 
-		const auto freeMem = getFreeMemory();
-		auto toAllocate = std::min(freeMem / 4, static_cast<unsigned long>(fileSize / 4));
-		if ( toAllocate < freeMem / 2 )
-			toAllocate = std::min(freeMem, static_cast<unsigned long>(fileSize));
-
 		if ( !quiet ) {
-			std::cout << colorize("Computing hash by chunks of size: ", Color::GREEN) << colorize(
-				humanReadableSize(toAllocate), Color::CYAN
-			) << std::endl;
+			std::cout << colorize("Computing hash", Color::GREEN) << std::endl;
 		}
-		auto hash = computeHash(file, toAllocate, fileSize, quiet);
+		auto hash = computeHash(file, fileSize, quiet);
 		if ( !quiet ) {
 			std::cout << colorize("Hash computed", Color::GREEN) << std::endl;
 		}
