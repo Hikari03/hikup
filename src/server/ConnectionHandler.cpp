@@ -108,9 +108,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 	_markedForRemoval.remove(hashFromClient);
 
 	std::ofstream file(_path, std::ios::binary);
-
-	std::cout << _path << std::endl;
-
+	
 	Utils::log("receiveFile: starting download of size: " + std::to_string(fileSize));
 
 	EVP_MD_CTX *mdctx;
@@ -158,16 +156,19 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 		return;
 	}
 
-	connection.sendInternal("OK");
+
 
 	_readyFiles.add(hashString);
 
-	auto HTTPLinkString = HTTPFileServer::createSymlinkFor(_path);
+	if ( std::is_same_v<T, ConnectionServer> ) {
+		connection.sendInternal("OK");
+		auto HTTPLinkString = HTTPFileServer::createSymlinkFor(_path);
 
-	connection.sendInternal(hashString);
-	connection.sendInternal(std::to_string(_settings.wantHttp));
-	if ( _settings.wantHttp && connection.receiveInternal() == "getHttpLink" )
-		connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + HTTPLinkString);
+		connection.sendInternal(hashString);
+		connection.sendInternal(std::to_string(_settings.wantHttp));
+		if ( _settings.wantHttp && connection.receiveInternal() == "getHttpLink" )
+			connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + HTTPLinkString);
+	}
 }
 
 void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
@@ -256,7 +257,8 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 		}
 	}
 
-	connection.send(""); // Protocol termination
+	connection.receiveInternal();
+
 }
 
 void ConnectionHandler::_removeOnSyncedTargets ( const std::string& hash ) {
@@ -265,7 +267,16 @@ void ConnectionHandler::_removeOnSyncedTargets ( const std::string& hash ) {
 	for ( const auto& target: _settings.syncTargets ) {
 		Connection connection;
 
-		try { connection.connectToServer(target.targetAddress, 6998, target.tlsCertVerify); }
+		std::string address = target.targetAddress;
+		int port = 6998;
+		if ( size_t pos = address.find_last_of(':'); pos != std::string::npos ) {
+			try {
+				port = std::stoi(address.substr(pos + 1));
+				address = address.substr(0, pos);
+			} catch (...) {}
+		}
+
+		try { connection.connectToServer(target.targetAddress, port, target.tlsCertVerify); }
 		catch ( ... ) {
 			Utils::log("removeOnSyncedTargets: Could not connect to remote");
 			continue;
@@ -373,8 +384,7 @@ void ConnectionHandler::_sendFileInSync ( T& connection, const std::string& file
 	connection.sendInternal("hash:" + hash);
 
 	if ( connection.receiveInternal() != "OK" ) {
-		Utils::elog("For some reason remote already has the file, this shouldn't happen");
-		connection.receiveInternal();
+		Utils::log("For some reason remote already has the file, skipping.");
 		return;
 	}
 
@@ -419,7 +429,6 @@ void ConnectionHandler::_sendFileInSync ( T& connection, const std::string& file
 		}
 	}
 
-	connection.send(""); // Protocol termination
 }
 
 // set substraction
@@ -560,12 +569,14 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 		++counter;
 	}
 
-	for ( size_t i = 0; i < toGet.size(); i-- ) {
+	for ( size_t i = 0; i < toGet.size(); ++i ) {
 		Utils::log(
 			"ConnectionHandler::_syncAsMaster: getting file " + std::to_string(i + 1) + "/" + std::to_string(
 				toGet.size()));
 		_handleReceiveFile(connection);
 	}
+
+	Utils::log("ConnectionHandler::_syncAsMaster: sync complete");
 }
 
 

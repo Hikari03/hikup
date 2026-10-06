@@ -52,9 +52,10 @@ Settings Settings::loadFromFile ( const std::filesystem::path& filePath ) {
         result.httpAddress = settings["server"]["httpAddress"].as_string()->value_or("http://0.0.0.0:6997");
         result.httpProtocol = settings["server"]["httpProtocol"].as_string()->value_or("http");
         result.httpDisplayInBrowser = settings["server"]["httpDisplayInBrowser"].as_boolean()->value_or(false);
-        result.authUser = settings["auth"]["user"].as_string()->value_or("admin");
-        result.authPass = settings["auth"]["password"].as_string()->value_or("admin");
     }
+
+    result.authUser = settings["auth"]["user"].as_string()->value_or("admin");
+    result.authPass = settings["auth"]["password"].as_string()->value_or("admin");
 
     if ( const auto syncTargets = settings["syncTargets"]["targets"].as_array() ) {
         auto it = syncTargets->begin();
