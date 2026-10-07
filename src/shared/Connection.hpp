@@ -8,6 +8,7 @@
 #include <mutex>
 #include <memory>
 #include <thread>
+#include <functional>
 #include <openssl/bio.h>
 #include <openssl/types.h>
 
@@ -53,12 +54,17 @@ public:
 	void connectToServer ( std::string ip, int port, bool forceServerCertVerify = true );
 
 	Connection& send ( const std::string& message );
+	Connection& send ( const char* data, size_t length );
+	Connection& sendRaw ( const char* data, size_t length );
 
 	Connection& sendData ( const std::string& message );
+	Connection& sendData ( const char* data, size_t length );
 
 	Connection& sendInternal ( const std::string& message );
 
 	std::string receive ();
+	void receiveStream ( const std::function<void(const char*, size_t)>& callback );
+	void receiveExact ( size_t length, const std::function<void(const char*, size_t)>& callback );
 
 	std::tuple<std::string, std::chrono::duration<double>> receiveWTime();
 

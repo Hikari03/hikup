@@ -7,7 +7,7 @@
 #include "../shared/Connection.hpp"
 
 void printHelp ( const std::string& argv0 ) {
-    std::cout << "Usage: " << argv0 << " [q]<up <file> | down <hash> | rm <hash> | ls <user> <pass>> <server> \n\n"
+    std::cout << "Usage: " << argv0 << " [q]<up <file> | down <hash> | rm <hash> | ls <user> <pass>> <server>[:port] \n\n"
                 "If file is successfully uploaded, you will get file hash\n"
                 "which you need to input if you want to download it.\n\n"
                 "For ls command, provide username and password (from server settings).\n\n"
@@ -50,6 +50,7 @@ int start ( int argc, char* argv[] ) {
     std::string fileName;
     std::string hash;
     std::string serverAddr;
+    int port = 6998;
 
 
     if ( (command.contains(Command::Type::UPLOAD) ||
@@ -66,7 +67,13 @@ int start ( int argc, char* argv[] ) {
 
         auto files = cutStringIntoVector(fileString);
 
-        connection.connectToServer(argv[3], 6998, SSLVerifyCert);
+        serverAddr = argv[3];
+        if ( size_t pos = serverAddr.find_last_of(':'); pos != std::string::npos ) {
+            port = std::stoi(serverAddr.substr(pos + 1));
+            serverAddr = serverAddr.substr(0, pos);
+        }
+
+        connection.connectToServer(serverAddr, port, SSLVerifyCert);
 
         return Batch::autoResolve(command, connection, files, quiet);
     }
@@ -78,6 +85,13 @@ int start ( int argc, char* argv[] ) {
         serverAddr = argv[3];
     }
 
+    if ( size_t pos = serverAddr.find_last_of(':'); pos != std::string::npos ) {
+        try {
+            port = std::stoi(serverAddr.substr(pos + 1));
+            serverAddr = serverAddr.substr(0, pos);
+        } catch (...) {}
+    }
+
     try {
         if ( command.contains(Command::Type::UPLOAD) ) {
             auto [_file, _fileSize, _fileName] = resolveFile(argv[2]);
@@ -86,18 +100,10 @@ int start ( int argc, char* argv[] ) {
             fileName = _fileName;
 
 
-            const auto freeMem = getFreeMemory();
-            auto toAllocate = std::min(freeMem / 4, static_cast<unsigned long>(fileSize / 4));
-            if ( toAllocate < freeMem / 2 )
-                toAllocate = std::min(freeMem, static_cast<unsigned long>(fileSize));
-
-
             if ( !quiet ) {
-                std::cout << colorize("Computing hash by chunks of size: ", Color::GREEN) << colorize(
-                    humanReadableSize(toAllocate), Color::CYAN
-                ) << std::endl;
+                std::cout << colorize("Computing hash", Color::GREEN) << std::endl;
             }
-            hash = computeHash(file, toAllocate, fileSize, quiet);
+            hash = computeHash(file, fileSize, quiet);
             if ( !quiet ) {
                 std::cout << colorize("Hash computed", Color::GREEN) << std::endl;
             }
@@ -107,7 +113,7 @@ int start ( int argc, char* argv[] ) {
             std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
         }
 
-        connection.connectToServer(serverAddr, 6998, SSLVerifyCert);
+        connection.connectToServer(serverAddr, port, SSLVerifyCert);
 
         if ( !quiet ) {
             std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
@@ -137,9 +143,9 @@ int start ( int argc, char* argv[] ) {
                     colorize(hash, Color::CYAN) << std::endl;
             const auto httpLink = connection.receiveInternal();
             if ( !quiet ) {
-                std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink + fileName.substr(fileName.find_last_of('.')), Color::CYAN) << std::endl;
+                std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink, Color::CYAN) << std::endl;
             } else {
-                std::cout << httpLink << fileName.substr(fileName.find_last_of('.')) << '\n';
+                std::cout << httpLink << '\n';
             }
         }
 

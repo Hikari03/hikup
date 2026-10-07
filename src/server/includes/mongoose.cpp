@@ -2071,12 +2071,34 @@ void mg_http_reply(struct mg_connection *c, int code, const char *headers,
                    const char *fmt, ...) {
   va_list ap;
   size_t len;
-  mg_printf(c, "HTTP/1.1 %d %s\r\n%sContent-Length:            \r\n\r\n", code,
-            mg_http_status_code_str(code), headers == NULL ? "" : headers);
-  len = c->send.len;
-  va_start(ap, fmt);
-  mg_vxprintf(mg_pfn_iobuf, &c->send, fmt, &ap);
-  va_end(ap);
+  bool is_error = code >= 400;
+  const char *body_css = is_error ?
+    "body { font-family: -apple-system, system-ui, sans-serif; background: #f8f9fa; color: #333; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }"
+    ".c { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 400px; }"
+    "h1 { color: #e53e3e; margin: 0 0 1rem; font-size: 4rem; }"
+    "p { color: #4a5568; margin: 0; }"
+    "@media (prefers-color-scheme: dark) { body { background: #1a202c; color: #e2e8f0; } .c { background: #2d3748; box-shadow: 0 4px 6px rgba(0,0,0,0.3); } p { color: #a0aec0; } }"
+    : "";
+
+  if (is_error) {
+    mg_printf(c, "HTTP/1.1 %d %s\r\nContent-Type: text/html; charset=utf-8\r\n%sContent-Length:            \r\n\r\n",
+              code, mg_http_status_code_str(code), headers == NULL ? "" : headers);
+    len = c->send.len;
+    mg_printf(c, "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>%d %s</title><style>%s</style></head><body><div class=\"c\"><h1>%d</h1><p>",
+              code, mg_http_status_code_str(code), body_css, code);
+    va_start(ap, fmt);
+    mg_vxprintf(mg_pfn_iobuf, &c->send, fmt, &ap);
+    va_end(ap);
+    mg_printf(c, "</p></div></body></html>");
+  } else {
+    mg_printf(c, "HTTP/1.1 %d %s\r\n%sContent-Length:            \r\n\r\n", code,
+              mg_http_status_code_str(code), headers == NULL ? "" : headers);
+    len = c->send.len;
+    va_start(ap, fmt);
+    mg_vxprintf(mg_pfn_iobuf, &c->send, fmt, &ap);
+    va_end(ap);
+  }
+
   if (c->send.len > 16) {
     size_t n = mg_snprintf((char *) &c->send.buf[len - 15], 11, "%-10lu",
                            (unsigned long) (c->send.len - len));
@@ -2331,7 +2353,7 @@ static void printdirentry(const char *name, void *userdata) {
     n = (int) mg_url_encode(name, strlen(name), path, sizeof(path));
     mg_printf(d->c,
               "  <tr><td><a href=\"%.*s%s\">%s%s</a></td>"
-              "<td name=%lu>%s</td><td name=%lld>%s</td></tr>\n",
+              "<td class=\"mod-col\" name=%lu>%s</td><td class=\"size-col\" name=%lld>%s</td></tr>\n",
               n, path, slash, name, slash, (unsigned long) t, mod,
               flags & MG_FS_DIR ? (int64_t) -1 : (int64_t) size, sz);
   }
@@ -2346,16 +2368,17 @@ static void listdir(struct mg_connection *c, struct mg_http_message *hm,
       "n1 = c1.getAttribute('name'), n2 = c2.getAttribute('name'), "
       "t1 = a.cells[2].getAttribute('name'), "
       "t2 = b.cells[2].getAttribute('name'); "
-      "return so * (t1 < 0 && t2 >= 0 ? -1 : t2 < 0 && t1 >= 0 ? 1 : "
+      "var res = t1 < 0 && t2 >= 0 ? -1 : t2 < 0 && t1 >= 0 ? 1 : "
       "n1 ? parseInt(n2) - parseInt(n1) : "
-      "c1.textContent.trim().localeCompare(c2.textContent.trim())); });";
+      "c1.textContent.trim().localeCompare(c2.textContent.trim(), undefined, {numeric: true, sensitivity: 'base'});"
+      "return so * res; });";
   const char *sort_js_code2 =
       "for (var i = 0; i < tr.length; i++) tb.appendChild(tr[i]); "
       "if (!d) window.location.hash = ('sc=' + sc + '&so=' + so); "
       "};"
       "window.onload = function() {"
       "var tb = document.getElementById('tb');"
-      "var m = /sc=([012]).so=(1|-1)/.exec(window.location.hash) || [0, 2, 1];"
+      "var m = /sc=([012]).so=(1|-1)/.exec(window.location.hash) || [0, 0, 1];"
       "var sc = m[1], so = m[2]; document.onclick = function(ev) { "
       "var c = ev.target.rel; if (c) {if (c == sc) so *= -1; srt(tb, c, so); "
       "sc = c; ev.preventDefault();}};"
@@ -2377,25 +2400,48 @@ static void listdir(struct mg_connection *c, struct mg_http_message *hm,
             opts->extra_headers == NULL ? "" : opts->extra_headers);
   off = c->send.len;  // Start of body
   mg_printf(c,
-            "<!DOCTYPE html><html><head><title>Index of %.*s</title>%s%s"
-            "<style>th,td {text-align: left; padding-right: 1em; "
-            "font-family: monospace; }</style></head>"
-            "<body><h1>Index of %.*s</h1><table cellpadding=\"0\"><thead>"
-            "<tr><th><a href=\"#\" rel=\"0\">Name</a></th><th>"
-            "<a href=\"#\" rel=\"1\">Modified</a></th>"
-            "<th><a href=\"#\" rel=\"2\">Size</a></th></tr>"
-            "<tr><td colspan=\"3\"><hr></td></tr>"
+            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>Index of %.*s</title>%s%s"
+            "<style>"
+            "body { font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f8f9fa; margin: 0; padding: 20px; }"
+            "h1 { font-size: 1.5rem; color: #1a1a1a; margin-bottom: 1.5rem; word-break: break-all; }"
+            "table { width: 100%%; border-collapse: collapse; background-color: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }"
+            "th, td { text-align: left; padding: 12px 15px; border-bottom: 1px solid #edf2f7; }"
+            "th { background-color: #f7fafc; font-weight: 600; color: #4a5568; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }"
+            "th a { color: inherit; text-decoration: none; display: flex; align-items: center; }"
+            "th a:after { content: '↕'; margin-left: 5px; opacity: 0.3; }"
+            "tr:hover { background-color: #f7fafc; }"
+            "a { color: #3182ce; text-decoration: none; }"
+            "a:hover { text-decoration: underline; }"
+            ".size-col, .mod-col { white-space: nowrap; color: #718096; font-size: 0.875rem; }"
+            "address { margin-top: 1.5rem; font-style: normal; font-size: 0.75rem; color: #a0aec0; text-align: center; }"
+            "@media (max-width: 600px) { body { padding: 10px; } table { font-size: 0.875rem; } th, td { padding: 8px 10px; } .mod-col { display: none; } }"
+            "@media (prefers-color-scheme: dark) {"
+            "  body { background-color: #1a202c; color: #e2e8f0; }"
+            "  h1 { color: #f7fafc; }"
+            "  table { background-color: #2d3748; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }"
+            "  th { background-color: #283141; color: #a0aec0; border-bottom: 1px solid #4a5568; }"
+            "  td { border-bottom: 1px solid #4a5568; }"
+            "  tr:hover { background-color: #364152; }"
+            "  a { color: #63b3ed; }"
+            "  .size-col, .mod-col { color: #a0aec0; }"
+            "}"
+            "</style></head>"
+            "<body><h1>Index of %.*s</h1><table><thead>"
+            "<tr><th><a href=\"#\" rel=\"0\">Name</a></th>"
+            "<th class=\"mod-col\"><a href=\"#\" rel=\"1\">Modified</a></th>"
+            "<th class=\"size-col\"><a href=\"#\" rel=\"2\">Size</a></th></tr>"
             "</thead>"
             "<tbody id=\"tb\">\n",
             (int) uri.len, uri.buf, sort_js_code, sort_js_code2, (int) uri.len,
             uri.buf);
   mg_printf(c, "%s",
             "  <tr><td><a href=\"..\">..</a></td>"
-            "<td name=-1></td><td name=-1>[DIR]</td></tr>\n");
+            "<td class=\"mod-col\" name=-1></td><td class=\"size-col\" name=-1>[DIR]</td></tr>\n");
 
   fs->ls(dir, printdirentry, &d);
   mg_printf(c,
-            "</tbody><tfoot><tr><td colspan=\"3\"><hr></td></tr></tfoot>"
+            "</tbody>"
             "</table><address>Mongoose v.%s</address></body></html>\n",
             MG_VERSION);
   n = mg_snprintf(tmp, sizeof(tmp), "%lu", (unsigned long) (c->send.len - off));

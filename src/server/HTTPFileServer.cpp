@@ -49,7 +49,7 @@ std::string HTTPFileServer::createSymlinkFor( const std::filesystem::path & file
 	const auto linkPath = std::filesystem::current_path() / "links" / fileName;
 
 	if ( std::filesystem::exists(linkPath) )
-		return "file already exists, this shouldn't happen";
+		return fileName;
 
 	std::filesystem::create_symlink(file, linkPath);
 	return fileName;
@@ -128,7 +128,16 @@ void HTTPFileServer::_ev_handler ( mg_connection* c, const int ev, void* ev_data
 		MG_INFO(( "File path2: %s", fileName.c_str() ));
 		fileName = fileName.substr(0, fileName.find('.'));
 		std::ranges::replace(fileName, '<', '.');
-		const auto filePath = "/" + hash + fileName.substr(fileName.find_last_of('.'));
+
+		std::string ext;
+
+		try {
+			ext = fileName.substr(fileName.find_last_of('.'));
+		} catch (...) {
+			ext = ".noext";
+		}
+
+		const auto filePath = "/" + hash + ext;
 		MG_INFO(( "File path3: %s", filePath.c_str() ));
 
 		if ( !std::filesystem::exists(HTTPFileServerVars::_rootDir + filePath) ) {

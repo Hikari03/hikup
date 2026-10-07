@@ -10,9 +10,10 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
         return;
     }
 
-    const auto freeRam = getFreeMemory() / 4;
+    const auto freeRamLimit = 64 * 1024 * 1024; // 64 MB
+    const auto freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4), static_cast<unsigned long>(8 * 1024 * 1024), static_cast<unsigned long>(freeRamLimit));
 
-    size_t chunkSize = 1024 * 1024;
+    size_t chunkSize = 8 * 1024 * 1024;
     auto buffer = std::make_unique<char[]>(chunkSize);
 
     double readSpeed = 0.0, uploadSpeed = 0.0;
@@ -42,7 +43,7 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
 
         const auto startUploadTime = std::chrono::high_resolution_clock::now();
 
-        connection.send(std::string(buffer.get(), file.gcount()));
+        connection.sendRaw(buffer.get(), file.gcount());
 
         const auto endUploadTime = std::chrono::high_resolution_clock::now();
 
@@ -50,11 +51,7 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
 
         totalTimeUpload += duration.count();
         sizeUploaded += file.gcount();
-
         uploadSpeed = static_cast<double>(sizeUploaded) / totalTimeUpload;
-
-        if ( connection.receiveInternal() != "confirm" )
-            throw std::runtime_error("Server did not confirm the chunk");
 
 #ifdef HIKUP_DEBUG
         std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
@@ -91,19 +88,20 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
         }
 
         // adjust chunk size based on duration
-        if (duration.count() > 1.4) {
-            // decrease chunkSize by 2%, ensure integer rounding
-            chunkSize = static_cast<int>(chunkSize * 0.75);
+        if (duration.count() > 1.0) {
+            // decrease chunkSize by 25%
+            chunkSize = static_cast<size_t>(chunkSize * 0.75);
+            if (chunkSize < 1024 * 1024) chunkSize = 1024 * 1024;
 
             buffer = std::make_unique<char[]>(chunkSize);
         }
-        else if ( duration.count() < 0.3 && freeRam >= chunkSize * 2 ) {
-            chunkSize = static_cast<int>(chunkSize * 2);
+        else if ( duration.count() < 0.2 && freeRam >= chunkSize * 2 ) {
+            chunkSize = static_cast<size_t>(chunkSize * 2);
             buffer = std::make_unique<char[]>(chunkSize);
 
         }
-        else if ( duration.count() < 0.6 && freeRam >= chunkSize * 2 ) {
-            chunkSize = static_cast<int>(chunkSize * 1.25);
+        else if ( duration.count() < 0.4 && freeRam >= chunkSize * 2 ) {
+            chunkSize = static_cast<size_t>(chunkSize * 1.25);
             buffer = std::make_unique<char[]>(chunkSize);
         }
     }
@@ -129,7 +127,6 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
     }
 #endif
 
-    connection.sendInternal("DONE");
     if ( const auto confirmation = connection.receiveInternal();
         confirmation != "OK") {
         std::cerr << colorize("Upload failed with response: " + confirmation, Color::RED);
@@ -166,14 +163,14 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
 void CommandHandlers::downloadFile ( Connection& connection, const bool quiet ) {
     auto fileSize = std::stoll(connection.receiveInternal());
     auto fileName = connection.receiveInternal();
-    double totalTimeDownload = 0.0, totalTimeWrite = 0.0;
 
-    auto freeRam = std::min(getFreeMemory() / 4, static_cast<unsigned long>(fileSize / 16));
+    const auto freeRamLimit = 64 * 1024 * 1024; // 64 MB
+    const auto freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4), static_cast<unsigned long>(4 * 1024 * 1024), static_cast<unsigned long>(freeRamLimit));
 
     connection.resizeBuffer(freeRam);
 
-    long long sizeWritten = 0;
     unsigned long long sizeDownloaded = 0;
+    const auto startOverall = std::chrono::high_resolution_clock::now();
 
     if ( !quiet ) {
         std::cout << colorize("Downloading file: ", Color::BLUE) + colorize(fileName, Color::CYAN) << colorize(
@@ -184,42 +181,34 @@ void CommandHandlers::downloadFile ( Connection& connection, const bool quiet ) 
     // create file
     std::ofstream file(fileName, std::ios::binary);
 
-    while ( true ) {
-        auto [chunk,duration] = connection.receiveWTime();
+    try {
+        connection.receiveExact(fileSize, [&](const char* chunk, size_t size) {
+            file.write(chunk, size);
+            sizeDownloaded += size;
 
-        if ( chunk == _internal"DONE" )
-            break;
+            if ( !quiet ) {
+                const auto now = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double> totalElapsed = now - startOverall;
+                double downloadSpeed = static_cast<double>(sizeDownloaded) / totalElapsed.count();
 
-        sizeDownloaded += chunk.size();
-        totalTimeDownload += duration.count();
-
-        auto downloadSpeed = static_cast<double>(sizeDownloaded) / totalTimeDownload;
-
-        auto writeStart = std::chrono::high_resolution_clock::now();
-        file.write(chunk.c_str(), static_cast<long>(chunk.size()));
-        auto writeEnd = std::chrono::high_resolution_clock::now();
-
-        duration = writeEnd - writeStart;
-
-        sizeWritten += chunk.size();
-        totalTimeWrite += duration.count();
-
-        auto writeSpeed = static_cast<double>(sizeWritten) / totalTimeWrite;
-
-        connection.sendInternal("confirm");
-
-        if ( !quiet ) {
-            std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) <<
-                    colorize(humanReadableSize(sizeWritten), Color::CYAN) << colorize("/", Color::BLUE) <<
-                    colorize(humanReadableSize(fileSize), Color::CYAN) << colorize(
-                        std::string(" (") +
-                        std::to_string(( static_cast<double>(sizeWritten) / static_cast<double>(fileSize) ) * 100.0).
-                        substr(0, 5) + " %)",
-                        Color::PURPLE
-                    ) << " ┃ " << colorize("Write: " + humanReadableSpeed(writeSpeed), Color::LL_BLUE) <<
-                    " ━━ " + colorize("Down: " + humanReadableSpeed(downloadSpeed), Color::GREEN) << "  " << std::flush;
-        }
+                std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) <<
+                        colorize(humanReadableSize(sizeDownloaded), Color::CYAN) << colorize("/", Color::BLUE) <<
+                        colorize(humanReadableSize(fileSize), Color::CYAN) << colorize(
+                            std::string(" (") +
+                            std::to_string(( static_cast<double>(sizeDownloaded) / static_cast<double>(fileSize) ) * 100.0).
+                            substr(0, 5) + " %)",
+                            Color::PURPLE
+                        ) << " ┃ " << colorize("Speed: " + humanReadableSpeed(downloadSpeed), Color::GREEN) << "  " << std::flush;
+            }
+        });
     }
+    catch ( const std::exception& e ) {
+        std::cerr << "\n" << colorize("Error downloading file: ", Color::RED) << colorize(e.what(), Color::RED) << std::endl;
+        file.close();
+        return;
+    }
+
+    connection.sendInternal("OK");
 
     if ( !quiet ) {
         std::cout << std::endl;
