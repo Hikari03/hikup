@@ -34,9 +34,12 @@ inline void accepter ( SSL_CTX* ctx,
 		}
 
 		if ( !newClientAccepted ) {
-			std::this_thread::sleep_for(std::chrono::seconds(2));
-
 			const auto conn = SSL_accept_connection(listener, SSL_ACCEPT_CONNECTION_NO_BLOCK);
+
+			if ( conn == nullptr ) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(10));
+				continue;
+			}
 
 			SSL_set_blocking_mode(conn, 1);
 

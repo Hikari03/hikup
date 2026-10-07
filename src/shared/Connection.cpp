@@ -487,18 +487,7 @@ void Connection::resizeBuffer ( const unsigned long newSize )  {
 }
 
 void Connection::close () {
-	/*
-	 * Repeatedly call SSL_shutdown() until the connection is fully
-	 * closed.
-	 */
-	int ret;
-	do {
-		ret = SSL_shutdown(_ssl);
-		if (ret < 0) {
-			throw std::runtime_error("Error shutting down: " + std::to_string(ret));
-		}
-	} while (ret != 1);
-
+	SSL_shutdown(_ssl);
 	SSL_CTX_free(_ctx);
 
 	_active = false;

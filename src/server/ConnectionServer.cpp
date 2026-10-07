@@ -21,15 +21,10 @@ ConnectionServer::~ConnectionServer () {
 	_active = false;
 
 	if ( SSL_stream_conclude(_clientInfo.getConn(), 0) != 1 ) {
-		std::cerr << "Unable to conclude stream\n";
-		SSL_free(_clientInfo.getConn());
-		return;
+		// std::cerr << "Unable to conclude stream\n";
 	}
 
-	while ( SSL_shutdown(_clientInfo.getConn()) != 1 ) {
-		// std::cerr << "Re-attempting SSL shutdown\n";
-	}
-
+	SSL_shutdown(_clientInfo.getConn());
 	SSL_free(_clientInfo.getConn());
 }
 
