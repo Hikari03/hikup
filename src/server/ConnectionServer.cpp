@@ -319,25 +319,26 @@ void ConnectionServer::send ( const std::string& message ) const {
 void ConnectionServer::send ( const char* data, size_t length ) const {
 	if ( !_active )
 		return;
-	try {
-		size_t nWritten = 0;
-		if ( SSL_write_ex(_clientInfo.getConn(), data, length, &nWritten) <= 0 || nWritten != length ) {
-			throw std::runtime_error("Could not send data to client");
-		}
-		if ( SSL_write_ex(_clientInfo.getConn(), _end, strlen(_end), &nWritten) <= 0 || nWritten != strlen(_end) ) {
-			throw std::runtime_error("Could not send end marker to client");
-		}
-	}
-	catch ( std::exception& ) { throw std::runtime_error("Could not send message to client"); }
+	sendRaw(data, length);
+	sendRaw(_end, strlen(_end));
 }
 
 void ConnectionServer::sendRaw ( const char* data, size_t length ) const {
 	if ( !_active )
 		return;
 	try {
-		size_t nWritten = 0;
-		if ( SSL_write_ex(_clientInfo.getConn(), data, length, &nWritten) <= 0 || nWritten != length ) {
-			throw std::runtime_error("Could not send data to client");
+		size_t totalWritten = 0;
+		while ( totalWritten < length ) {
+			size_t nWritten = 0;
+			const auto ret = SSL_write_ex(_clientInfo.getConn(), data + totalWritten, length - totalWritten, &nWritten);
+			if ( ret <= 0 ) {
+				const int err = SSL_get_error(_clientInfo.getConn(), ret);
+				if ( err == SSL_ERROR_WANT_WRITE || err == SSL_ERROR_WANT_READ ) {
+					continue;
+				}
+				throw std::runtime_error("Could not send data to client");
+			}
+			totalWritten += nWritten;
 		}
 	}
 	catch ( std::exception& ) { throw std::runtime_error("Could not send message to client"); }
@@ -345,14 +346,12 @@ void ConnectionServer::sendRaw ( const char* data, size_t length ) const {
 
 void ConnectionServer::sendData ( const std::string& message ) const { sendData(message.data(), message.size()); }
 void ConnectionServer::sendData ( const char* data, size_t length ) const {
-    size_t nWritten = 0;
-    SSL_write_ex(_clientInfo.getConn(), _data, strlen(_data), &nWritten);
+    sendRaw(_data, strlen(_data));
     send(data, length);
 }
 
 void ConnectionServer::sendInternal ( const std::string& message ) const {
-    size_t nWritten = 0;
-    SSL_write_ex(_clientInfo.getConn(), _internal, strlen(_internal), &nWritten);
+    sendRaw(_internal, strlen(_internal));
     send(message.data(), message.size());
 }
 
