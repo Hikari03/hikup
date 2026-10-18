@@ -1,22 +1,60 @@
+#include <algorithm>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <set>
 
 #include "BatchHandlers.hpp"
 #include "CommandHandlers.hpp"
 #include "CommandType.hpp"
+#include "Style.hpp"
 #include "../shared/Connection.hpp"
 
+using namespace ui;
+
+namespace {
+
 void printHelp ( const std::string& argv0 ) {
-    std::cout << "Usage: " << argv0 << " [q]<up <file> | down <hash> | rm <hash> | ls <user> <pass>> <server>[:port] \n\n"
-                "If file is successfully uploaded, you will get file hash\n"
-                "which you need to input if you want to download it.\n\n"
-                "For ls command, provide username and password (from server settings).\n\n"
-                "If server has HTTP server, you will get link for download.\n"
-                "You can append '?view=yes' to the link to view the file in browser.\n\n"
-                "You can also replace the file/hash with `-` and pass space/new-line separated list to standard input\n\n"
-                "add `q` into argument with up, down, rm for silent run. i.e. qup\n"
-                "add `v` to force TLS to verify server certificate" << std::endl;
+    const auto prog = std::filesystem::path(argv0).filename().string();
+    auto cmd  = [](const std::string& s) { return paint(s, RUST); };
+    auto note = [](const std::string& s) { return paint(s, ASH); };
+
+    std::cout
+        << '\n' << paint("::", RUST) << ' ' << paint(prog, BOLD) << note("  // file transfer client") << "\n\n"
+        << "  " << note("usage") << "   " << prog << " [q|v]" << cmd("<cmd>") << " <args> <server>[:port]\n\n"
+        << "  " << note("commands") << '\n'
+        << "    " << cmd("up")   << "  <file>        upload a file, prints its hash\n"
+        << "    " << cmd("down") << "  <hash>        download by hash\n"
+        << "    " << cmd("rm")   << "    <hash>        remove by hash\n"
+        << "    " << cmd("ls")   << "    <user> <pass> list files (credentials from server settings)\n\n"
+        << "  " << note("modifiers") << " (prefix the command, e.g. qup)\n"
+        << "    " << cmd("q") << "   quiet, no decoration, output is only hash/link\n"
+        << "    " << cmd("v") << "   force TLS certificate verification\n\n"
+        << "  " << note("batch") << '\n'
+        << "    use " << cmd("-") << " instead of file/hash and pipe a space/newline separated list to stdin\n\n"
+        << "  " << note("http") << '\n'
+        << "    if the server has an HTTP frontend you get a download link;\n"
+        << "    append " << cmd("?view=yes") << " to view the file in a browser\n\n";
+    std::cout.flush();
 }
+
+struct Endpoint { std::string host; int port = 6998; };
+
+Endpoint parseEndpoint ( std::string s ) {
+    Endpoint ep;
+    if ( const size_t pos = s.find_last_of(':'); pos != std::string::npos ) {
+        try {
+            ep.port = std::stoi(s.substr(pos + 1));
+            s.resize(pos);
+        } catch ( ... ) {}                       // not a port, treat as part of the host
+    }
+    ep.host = std::move(s);
+    return ep;
+}
+
+} // namespace
 
 int start ( int argc, char* argv[] ) {
     if ( argc < 4 ) {
@@ -26,104 +64,79 @@ int start ( int argc, char* argv[] ) {
 
     auto command = Command::resolveCommand(argv[1]);
 
-    bool SSLVerifyCert = command.contains(Command::Type::SSL_VERIFY_CERT);
+    const bool SSLVerifyCert = command.contains(Command::Type::SSL_VERIFY_CERT);
+    const bool quiet         = command.contains(Command::Type::QUIET);
 
-    const auto quiet = command.contains(Command::Type::QUIET);
-
-    if ( !strcmp(argv[2], "-") )
+    if ( !std::strcmp(argv[2], "-") )
         command.emplace(Command::Type::BATCH);
 
     if ( !Command::isValid(command) ) {
-        std::cerr << colorize("Invalid command", Color::RED) << std::endl;
+        fail("invalid command");
         return 1;
     }
 
     if ( command.contains(Command::Type::LIST) && argc != 5 ) {
-        std::cerr << colorize("Invalid number of arguments for list command", Color::RED) << std::endl;
+        fail("ls needs exactly: ls <user> <pass> <server>[:port]");
         printHelp(argv[0]);
         return 1;
     }
 
+    const auto ep = parseEndpoint(command.contains(Command::Type::LIST) ? argv[4] : argv[3]);
+
     Connection connection;
-    std::ifstream file;
-    std::ifstream::pos_type fileSize;
-    std::string fileName;
-    std::string hash;
-    std::string serverAddr;
-    int port = 6998;
 
+    // ── Batch mode: list of files/hashes on stdin ────────────────────────
+    if ( ( command.contains(Command::Type::UPLOAD) ||
+           command.contains(Command::Type::REMOVE) ||
+           command.contains(Command::Type::DOWNLOAD) ) &&
+         command.contains(Command::Type::BATCH) ) {
 
-    if ( (command.contains(Command::Type::UPLOAD) ||
-         command.contains(Command::Type::REMOVE) ||
-         command.contains(Command::Type::DOWNLOAD)) &&
-         command.contains(Command::Type::BATCH)) {
+        std::string input{ std::istreambuf_iterator<char>(std::cin), std::istreambuf_iterator<char>() };
+        std::ranges::replace_if(input, [](char c) { return c == '\n' || c == '\r'; }, ' ');
+        const auto files = cutStringIntoVector(input);
 
-        std::string fileString, tmp;
-
-        while ( !std::cin.eof() ) {
-            std::getline(std::cin, tmp);
-            fileString += tmp + ' ';
+        if ( files.empty() ) {
+            fail("nothing to do, stdin was empty");
+            return 1;
         }
 
-        auto files = cutStringIntoVector(fileString);
-
-        serverAddr = argv[3];
-        if ( size_t pos = serverAddr.find_last_of(':'); pos != std::string::npos ) {
-            port = std::stoi(serverAddr.substr(pos + 1));
-            serverAddr = serverAddr.substr(0, pos);
+        try {
+            connection.connectToServer(ep.host, ep.port, SSLVerifyCert);
+        } catch ( std::runtime_error& e ) {
+            fail(e.what());
+            return 1;
         }
-
-        connection.connectToServer(serverAddr, port, SSLVerifyCert);
 
         return Batch::autoResolve(command, connection, files, quiet);
     }
 
-    if ( command.contains(Command::Type::LIST) ) {
-        serverAddr = argv[4];
-    }
-    else {
-        serverAddr = argv[3];
-    }
-
-    if ( size_t pos = serverAddr.find_last_of(':'); pos != std::string::npos ) {
-        try {
-            port = std::stoi(serverAddr.substr(pos + 1));
-            serverAddr = serverAddr.substr(0, pos);
-        } catch (...) {}
-    }
+    // ── Single command ───────────────────────────────────────────────────
+    std::ifstream file;
+    std::ifstream::pos_type fileSize{};
+    std::string fileName, hash;
 
     try {
         if ( command.contains(Command::Type::UPLOAD) ) {
             auto [_file, _fileSize, _fileName] = resolveFile(argv[2]);
-            file = std::move(_file);
+            file     = std::move(_file);
             fileSize = _fileSize;
             fileName = _fileName;
 
-
-            if ( !quiet ) {
-                std::cout << colorize("Computing hash", Color::GREEN) << std::endl;
-            }
+            if ( !quiet ) step("hashing", fileName);
             hash = computeHash(file, fileSize, quiet);
-            if ( !quiet ) {
-                std::cout << colorize("Hash computed", Color::GREEN) << std::endl;
-            }
+            if ( !quiet ) done("hashed");
         }
 
-        if ( !quiet ) {
-            std::cout << colorize("Connecting to server", Color::GREEN) << std::endl;
-        }
-
-        connection.connectToServer(serverAddr, port, SSLVerifyCert);
-
-        if ( !quiet ) {
-            std::cout << colorize("Connected to server", Color::GREEN) << std::endl;
-        }
+        if ( !quiet ) step("connecting", ep.host + ":" + std::to_string(ep.port));
+        connection.connectToServer(ep.host, ep.port, SSLVerifyCert);
+        if ( !quiet ) done("connected");
     }
     catch ( std::runtime_error& e ) {
-        std::cerr << colorize(e.what(), Color::RED) << std::endl;
+        fail(e.what());
         return 1;
     }
 
+    // ── Handshake ────────────────────────────────────────────────────────
     connection.sendInternal("command:" + Command::toString(Command::selectBasic(command)));
     if ( command.contains(Command::Type::UPLOAD) ) {
         connection.sendInternal("size:" + std::to_string(fileSize));
@@ -131,52 +144,41 @@ int start ( int argc, char* argv[] ) {
         connection.sendInternal("hash:" + hash);
     }
     else if ( command.contains(Command::Type::DOWNLOAD) || command.contains(Command::Type::REMOVE) ) {
-        fileName = argv[2];
+        fileName = argv[2];                                  // here: the hash
         connection.sendInternal("hash:" + fileName);
     }
 
     if ( const auto reason = connection.receiveInternal(); reason != "OK" ) {
-        std::cerr << colorize("Server did not accept the request\n", Color::RED);
-
         if ( command.contains(Command::Type::UPLOAD) ) {
-            std::cerr << colorize("Reason: " + reason + '\n', Color::RED) << colorize("Hash: ", Color::PURPLE) <<
-                    colorize(hash, Color::CYAN) << std::endl;
+            // server already has this file and answers with its link
             const auto httpLink = connection.receiveInternal();
-            if ( !quiet ) {
-                std::cout << colorize("HTTP link: ", Color::PURPLE) << colorize(httpLink, Color::CYAN) << std::endl;
-            } else {
+            if ( quiet ) {
                 std::cout << httpLink << '\n';
+            } else {
+                std::cerr << tag("!", BRICK) << " server refused the upload: " << reason << '\n';
+                printTree(paint("    already known to the server", ASH), {
+                    { "hash", hash,     RUST  },
+                    { "link", httpLink, AMBER },
+                }, std::cout);
             }
-        }
-
-
-        else {
-            if ( !quiet ) {
-                std::cout << colorize("Reason: " + reason, Color::RED) << std::endl;
-            }
+        } else {
+            fail("server refused the request: " + reason);
         }
         return 1;
     }
 
     if ( command.contains(Command::Type::REMOVE) ) {
-        if ( !quiet ) {
-            std::cout << colorize("File with hash ", Color::GREEN) << colorize(fileName, Color::CYAN) << colorize(
-                " removed!", Color::RED
-            ) << std::endl;
-        }
+        if ( !quiet ) done("removed", fileName);
         return 0;
     }
-    if ( !quiet ) {
-        std::cout << colorize("Server ready!\n", Color::GREEN) << std::endl;
-    }
 
+    // ── Dispatch ─────────────────────────────────────────────────────────
     if ( command.contains(Command::Type::UPLOAD) )
         CommandHandlers::sendFile(file, fileSize, connection, quiet);
     else if ( command.contains(Command::Type::DOWNLOAD) )
         CommandHandlers::downloadFile(connection, quiet);
-    else if ( command.contains(Command::Type::LIST) ) {
+    else if ( command.contains(Command::Type::LIST) )
         return CommandHandlers::listFiles(connection, argv[2], argv[3]);
-    }
 
     return 0;
 }
@@ -187,7 +189,7 @@ int main ( const int argc, char* argv[] ) {
 
     try { return start(argc, argv); }
     catch ( std::exception& e ) {
-        std::cerr << colorize(e.what(), Color::RED) << std::endl;
+        fail(e.what());
         return 1;
     }
 }

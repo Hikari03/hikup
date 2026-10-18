@@ -45,7 +45,8 @@ add_executable(hikup src/client/main.cpp
         src/client/BatchHandlers.cpp
         src/client/CommandHandlers.cpp
         src/client/CommandHandlers.hpp
-        src/client/CommandType.hpp)
+        src/client/CommandType.hpp
+        src/client/Style.hpp)
 
 add_executable(hikup-server src/server/main.cpp
         src/server/terminal.cpp

@@ -1,280 +1,278 @@
 #include "CommandHandlers.hpp"
 
-#include "Color.hpp"
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <sys/ioctl.h>   // Windows: GetConsoleScreenBufferInfo
+#include <unistd.h>      // isatty (Windows: <io.h>, _isatty/_fileno)
+#include <vector>
+
+#include "Color.hpp"     // drop if nothing else in this file uses colorize()
 #include "util.cpp"
+#include "Style.hpp"
 #include "../shared/FileInfo.hpp"
 
-void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection, const bool quiet ) {
-    if ( !file.good() ) {
-        std::cerr << colorize("Could not open file", Color::RED) << std::endl;
-        return;
-    }
-
-    const auto freeRamLimit = 64 * 1024 * 1024; // 64 MB
-    const auto freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4), static_cast<unsigned long>(8 * 1024 * 1024), static_cast<unsigned long>(freeRamLimit));
-
-    size_t chunkSize = 8 * 1024 * 1024;
-    auto buffer = std::make_unique<char[]>(chunkSize);
-
-    double readSpeed = 0.0, uploadSpeed = 0.0;
-
-    double totalTimeRead = 0.0, totalTimeUpload = 0.0;
-
-    unsigned long long sizeRead = 0;
-    unsigned long long sizeUploaded = 0;
-
-    if ( !quiet ) {
-        std::cout << colorize("Starting upload of size: ", Color::BLUE) << colorize(
-            humanReadableSize(fileSize), Color::CYAN
-        ) << "\n" << std::endl;
-    }
-
-    while ( true ) {
-        const auto startReadTime = std::chrono::high_resolution_clock::now();
-        file.read(buffer.get(), chunkSize);
-        const auto endReadTime = std::chrono::high_resolution_clock::now();
-
-        std::chrono::duration<double> duration = endReadTime - startReadTime;
-
-        totalTimeRead += duration.count();
-        sizeRead += file.gcount();
-
-        readSpeed = static_cast<double>(sizeRead) / totalTimeRead;
-
-        const auto startUploadTime = std::chrono::high_resolution_clock::now();
-
-        connection.sendRaw(buffer.get(), file.gcount());
-
-        const auto endUploadTime = std::chrono::high_resolution_clock::now();
-
-        duration = endUploadTime - startUploadTime;
-
-        totalTimeUpload += duration.count();
-        sizeUploaded += file.gcount();
-        uploadSpeed = static_cast<double>(sizeUploaded) / totalTimeUpload;
-
-#ifdef HIKUP_DEBUG
-        std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
-                colorize(humanReadableSize(sizeUploaded), Color::CYAN) + colorize("/", Color::BLUE) +
-                colorize(humanReadableSize(fileSize), Color::CYAN) + colorize(
-                    std::string(" (") +
-                    std::to_string(( static_cast<double>(sizeUploaded) / static_cast<double>(fileSize) ) * 100.0).
-                    substr(0, 5) + " %)",
-                    Color::PURPLE
-                ) + " ┃ " + colorize("Read: " + humanReadableSpeed(readSpeed), Color::LL_BLUE) + " ━━ "
-                + colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " + "| DEBUG | chunk size: " +
-                humanReadableSize(chunkSize) << std::flush;
-#else
-        if ( !quiet ) {
-            std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
-                    colorize(humanReadableSize(sizeUploaded), Color::CYAN) + colorize("/", Color::BLUE) +
-                    colorize(humanReadableSize(fileSize), Color::CYAN) + colorize(
-                        std::string(" (") +
-                        std::to_string(( static_cast<double>(sizeUploaded) / static_cast<double>(fileSize) ) * 100.0).
-                        substr(0, 5) + " %)",
-                        Color::PURPLE
-                    ) + " ┃ " + colorize("Read: " + humanReadableSpeed(readSpeed), Color::LL_BLUE) + " ━━ "
-                    + colorize("Up: " + humanReadableSpeed(uploadSpeed), Color::GREEN) + "  " << std::flush;
-        }
-#endif
-
-
-        if ( sizeRead == static_cast<unsigned long long>(fileSize) ) {
-#ifdef HIKUP_DEBUG
-            std::cout << "DEBUG | Final chunk sent, breaking loop. | \nchunkSize: " << chunkSize << "\nsizeRead: " << sizeRead <<
-                    "\nsizeUploaded: " << sizeUploaded << "\nfileSize: " << fileSize << std::endl;
-#endif
-            break;
-        }
-
-        // adjust chunk size based on duration
-        if (duration.count() > 1.0) {
-            // decrease chunkSize by 25%
-            chunkSize = static_cast<size_t>(chunkSize * 0.75);
-            if (chunkSize < 1024 * 1024) chunkSize = 1024 * 1024;
-
-            buffer = std::make_unique<char[]>(chunkSize);
-        }
-        else if ( duration.count() < 0.2 && freeRam >= chunkSize * 2 ) {
-            chunkSize = static_cast<size_t>(chunkSize * 2);
-            buffer = std::make_unique<char[]>(chunkSize);
-
-        }
-        else if ( duration.count() < 0.4 && freeRam >= chunkSize * 2 ) {
-            chunkSize = static_cast<size_t>(chunkSize * 1.25);
-            buffer = std::make_unique<char[]>(chunkSize);
-        }
-    }
-
-#ifdef HIKUP_DEBUG
-    std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
-            colorize(humanReadableSize(sizeUploaded), Color::CYAN) + colorize(
-                "/", Color::BLUE
-            ) + colorize(
-                humanReadableSize(sizeUploaded),
-                Color::CYAN
-            ) + colorize(" (100 %)  ", Color::PURPLE) + "| DEBUG | chunk size: " + humanReadableSize(chunkSize) <<
-            std::endl;
-#else
-    if ( !quiet ) {
-        std::cout << "\r" << colorize("Sending data: ", Color::BLUE) +
-                colorize(humanReadableSize(sizeUploaded), Color::CYAN) + colorize(
-                    "/", Color::BLUE
-                ) + colorize(
-                    humanReadableSize(sizeUploaded),
-                    Color::CYAN
-                ) + colorize(" (100 %)  ", Color::PURPLE) << std::endl;
-    }
-#endif
-
-    if ( const auto confirmation = connection.receiveInternal();
-        confirmation != "OK") {
-        std::cerr << colorize("Upload failed with response: " + confirmation, Color::RED);
-        return;
-    }
-
-
-    const auto hash = connection.receiveInternal();
-    const bool httpExists = std::stoi(connection.receiveInternal());
-
-    if ( !quiet ) {
-        std::cout << colorize("File uploaded successfully with hash: ", Color::GREEN) + colorize(hash, Color::CYAN) <<
-                std::endl;
-    } else {
-        std::cout << "hash: " << hash << '\n';
-    }
-
-    if ( httpExists == true ) {
-        connection.sendInternal("getHttpLink");
-        const auto httpLink = connection.receiveInternal();
-        if ( !quiet ) {
-            std::cout << colorize("HTTP link: ", Color::GREEN) + colorize(httpLink, Color::CYAN) << std::endl;
-        } else {
-            std::cout << "http: " << httpLink << "\n\n";
-        }
-    }
-    else {
-        if ( !quiet ) {
-            std::cout << colorize("HTTP link: ", Color::GREEN) + colorize("not available", Color::CYAN) << std::endl;
-        }
+namespace ui {
+    void drawProgress(const std::string& verb, unsigned long long done, unsigned long long total,
+                  double speed, size_t termW) {
+        drawBar(verb,
+                total ? double(done) / double(total) : 1.0,
+                humanReadableSize(done) + "/" + humanReadableSize(total),
+                humanReadableSpeed(speed),
+                speed > 0 ? "eta " + formatDuration(double(total - done) / speed) : "eta --",
+                termW);
     }
 }
 
-void CommandHandlers::downloadFile ( Connection& connection, const bool quiet ) {
-    auto fileSize = std::stoll(connection.receiveInternal());
-    auto fileName = connection.receiveInternal();
 
-    const auto freeRamLimit = 64 * 1024 * 1024; // 64 MB
-    const auto freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4), static_cast<unsigned long>(4 * 1024 * 1024), static_cast<unsigned long>(freeRamLimit));
+// ═════════════════════════════════════════════════════════════════════════
+void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection, const bool quiet ) {
+    if ( !file.good() ) { ui::fail("could not open file"); return; }
 
-    connection.resizeBuffer(freeRam);
+    using clock = std::chrono::steady_clock;
+    const auto total = static_cast<unsigned long long>(fileSize);
 
-    unsigned long long sizeDownloaded = 0;
-    const auto startOverall = std::chrono::high_resolution_clock::now();
+    const unsigned long freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4),
+                                             static_cast<unsigned long>(8 * 1024 * 1024),
+                                             static_cast<unsigned long>(64 * 1024 * 1024));
 
-    if ( !quiet ) {
-        std::cout << colorize("Downloading file: ", Color::BLUE) + colorize(fileName, Color::CYAN) << colorize(
-            " of size: ", Color::BLUE
-        ) << colorize(humanReadableSize(fileSize), Color::CYAN) << std::endl;
+    size_t chunkSize = 8 * 1024 * 1024;
+    std::vector<char> buffer(chunkSize);
+
+    double upTime = 0.0;
+    unsigned long long sent = 0;
+
+    const bool showProgress = !quiet && ui::g_tty;
+    const size_t termW = ui::terminalWidth();
+
+    const auto start = clock::now();
+    auto lastDraw = start - std::chrono::seconds(1);
+
+    while ( sent < total ) {
+        file.read(buffer.data(), static_cast<std::streamsize>(chunkSize));
+        const auto got = static_cast<size_t>(file.gcount());
+        if ( got == 0 ) break;                          // truncated file / read error
+
+        const auto t0 = clock::now();
+        connection.sendRaw(buffer.data(), got);
+        const std::chrono::duration<double> upDur = clock::now() - t0;
+
+        upTime += upDur.count();
+        sent   += got;
+
+        if ( showProgress && clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
+            ui::drawProgress("uploading", sent, total, upTime > 0 ? static_cast<double>(sent) / upTime : 0.0, termW);
+            lastDraw = clock::now();
+        }
+
+        size_t newSize = chunkSize;
+        if ( upDur.count() > 1.0 )                                  newSize = std::max<size_t>(1024 * 1024, chunkSize * 0.75);
+        else if ( upDur.count() < 0.2 && freeRam >= chunkSize * 2 ) newSize = chunkSize * 2;
+        else if ( upDur.count() < 0.4 && freeRam >= chunkSize * 2 ) newSize = chunkSize * 1.25;
+
+        if ( newSize != chunkSize ) { chunkSize = newSize; buffer.resize(chunkSize); }
     }
 
-    // create file
+    const std::chrono::duration<double> wall = clock::now() - start;
+    if ( showProgress ) ui::clearLine();
+
+    if ( sent != total ) {
+        ui::fail("upload incomplete: sent " + humanReadableSize(sent) + " of " + humanReadableSize(total));
+        return;
+    }
+
+    if ( const auto confirmation = connection.receiveInternal(); confirmation != "OK" ) {
+        ui::fail("upload failed: " + confirmation);
+        return;
+    }
+
+    const auto hash = connection.receiveInternal();
+    const bool httpExists = std::stoi(connection.receiveInternal()) != 0;
+
+    std::string httpLink;
+    if ( httpExists ) {
+        connection.sendInternal("getHttpLink");
+        httpLink = connection.receiveInternal();
+    }
+
+    if ( quiet ) {
+        std::cout << "hash: " << hash << '\n';
+        if ( httpExists ) std::cout << "http: " << httpLink << "\n\n";
+        return;
+    }
+
+    const double avg = wall.count() > 0 ? double(total) / wall.count() : 0.0;
+    std::vector<ui::Field> fields = {
+        { "time", ui::formatDuration(wall.count()) + " @ " + humanReadableSpeed(avg), ui::SAND },
+        { "hash", hash, ui::RUST },
+        { "link", httpExists ? httpLink : "not available",                       httpExists ? ui::AMBER : ui::ASH },
+    };
+#ifdef HIKUP_DEBUG
+    fields.push_back({ "chunk", humanReadableSize(chunkSize), ui::ASH });
+#endif
+    printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("uploaded", ui::BOLD) + " " + ui::paint(humanReadableSize(fileSize), ui::AMBER), fields);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+void CommandHandlers::downloadFile ( Connection& connection, const bool quiet ) {
+    using clock = std::chrono::steady_clock;
+
+    const auto fileSize = std::stoll(connection.receiveInternal());
+    const auto total    = static_cast<unsigned long long>(fileSize);
+
+    // never trust a server-supplied name as a path
+    const std::string fileName = std::filesystem::path(connection.receiveInternal()).filename().string();
+    if ( fileName.empty() || fileName == "." || fileName == ".." ) {
+        ui::fail("server sent an invalid file name");
+        return;
+    }
+
+    const unsigned long freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4),
+                                             static_cast<unsigned long>(4 * 1024 * 1024),
+                                             static_cast<unsigned long>(64 * 1024 * 1024));
+    connection.resizeBuffer(freeRam);
+
     std::ofstream file(fileName, std::ios::binary);
+    if ( !file ) { ui::fail("could not create " + fileName); return; }
+
+    const bool showProgress = !quiet && ui::g_tty;
+    const size_t termW = ui::terminalWidth();
+    unsigned long long got = 0;
+
+    if ( !quiet ) {
+        std::cout << '\n' << ui::tag("*", ui::RUST) << ' ' << ui::paint("downloading", ui::BOLD) << ' '
+                  << ui::styledName(fileName) << '\n';
+    }
+
+    const auto start = clock::now();
+    auto lastDraw = start - std::chrono::seconds(1);
 
     try {
         connection.receiveExact(fileSize, [&](const char* chunk, size_t size) {
-            file.write(chunk, size);
-            sizeDownloaded += size;
+            file.write(chunk, static_cast<std::streamsize>(size));
+            if ( !file ) throw std::runtime_error("failed to write to disk");
+            got += size;
 
-            if ( !quiet ) {
-                const auto now = std::chrono::high_resolution_clock::now();
-                std::chrono::duration<double> totalElapsed = now - startOverall;
-                double downloadSpeed = static_cast<double>(sizeDownloaded) / totalElapsed.count();
-
-                std::cout << "\r" << colorize("Receiving data: ", Color::BLUE) <<
-                        colorize(humanReadableSize(sizeDownloaded), Color::CYAN) << colorize("/", Color::BLUE) <<
-                        colorize(humanReadableSize(fileSize), Color::CYAN) << colorize(
-                            std::string(" (") +
-                            std::to_string(( static_cast<double>(sizeDownloaded) / static_cast<double>(fileSize) ) * 100.0).
-                            substr(0, 5) + " %)",
-                            Color::PURPLE
-                        ) << " ┃ " << colorize("Speed: " + humanReadableSpeed(downloadSpeed), Color::GREEN) << "  " << std::flush;
+            if ( showProgress && clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
+                const std::chrono::duration<double> el = clock::now() - start;
+                ui::drawProgress("downloading", got, total, el.count() > 0 ? static_cast<double>(got) / el.count() : 0.0, termW);
+                lastDraw = clock::now();
             }
         });
-    }
-    catch ( const std::exception& e ) {
-        std::cerr << "\n" << colorize("Error downloading file: ", Color::RED) << colorize(e.what(), Color::RED) << std::endl;
+    } catch ( const std::exception& e ) {
+        if ( showProgress )
+            ui::clearLine();
+        ui::fail(std::string("download failed: ") + e.what());
         file.close();
+        std::error_code ec;
+        std::filesystem::remove(fileName, ec);          // no partial files
         return;
     }
 
+    const std::chrono::duration<double> wall = clock::now() - start;
+    file.close();
+    if ( showProgress )
+        ui::clearLine();
+
     connection.sendInternal("OK");
 
-    if ( !quiet ) {
-        std::cout << std::endl;
-    }
+    if ( quiet ) return;
+
+    const double avg = wall.count() > 0 ? double(total) / wall.count() : 0.0;
+    ui::printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("downloaded", ui::BOLD) + " " + ui::styledName(fileName), {
+                      { "size", humanReadableSize(fileSize), ui::AMBER },
+                      { "time", ui::formatDuration(wall.count()) + " @ " + humanReadableSpeed(avg), ui::SAND  },
+                  });
 }
 
+// ═════════════════════════════════════════════════════════════════════════
 int CommandHandlers::listFiles ( Connection& connection, const std::string& user, const std::string& pass ) {
     connection.sendInternal("user:" + user);
     connection.sendInternal("pass:" + pass);
 
     if ( connection.receiveInternal() != "OK" ) {
-        std::cerr << colorize("Authentication failed", Color::RED) << std::endl;
+        ui::fail("authentication failed");
         return 1;
     }
 
     std::vector<FileInfo> files;
-    unsigned maxNameSize = 4, maxSizeSize = 4, maxDateSize = 11; // min sizes for headers
-
     try {
         std::string fileData;
         while ( ( fileData = connection.receive() ) != _internal"DONE" ) {
-            FileInfo fileInfo(fileData.substr(strlen(_data)));
-            maxNameSize = std::max(maxNameSize, static_cast<unsigned>(fileInfo.getName().size()));
-            maxSizeSize = std::max(maxSizeSize, static_cast<unsigned>(humanReadableSize(fileInfo.getSize()).size()));
-            maxDateSize = std::max(maxDateSize, static_cast<unsigned>(fileInfo.getCreationDateString_c().size()));
-
-            files.emplace_back(fileInfo);
+            files.emplace_back(fileData.substr(strlen(_data)));
         }
     } catch ( std::runtime_error& e ) {
-        std::cerr << colorize("Error receiving file list: ", Color::RED) + colorize(e.what(), Color::RED) << std::endl;
+        ui::fail(std::string("error receiving file list: ") + e.what());
         return 1;
     }
 
-    std::cout << padStringToSize("| Name", maxNameSize+2) + " | " +
-                padStringToSize("Size", maxSizeSize) + " | " +
-                padStringToSize("Upload Date", maxDateSize) + " | " +
-                padStringToSize("Hash", files[0].getHash().size()) + "\n";
-    std::cout << '|' + std::string(maxNameSize+2, '-') + "|" +
-                std::string(maxSizeSize+2, '-') + "|" +
-                std::string(maxDateSize+2, '-') + "|" +
-                std::string(files[0].getHash().size()+1, '-') + '\n';
-
-
-    for ( auto& file: files ) {
-        std::cout << "| " +
-            colorize(
-                padStringToSize(
-                    file.getName(),
-                    maxNameSize),
-                Color::CYAN) + " | " +
-            colorize(
-                padStringToSize(
-                    humanReadableSize(
-                        file.getSize()),
-                        maxSizeSize),
-                Color::LL_BLUE) + " | " +
-            colorize(file.getCreationDateString_c(), Color::GREEN) + " | " +
-            colorize(file.getHash(), Color::PURPLE) + '\n';
+    if ( files.empty() ) {
+        std::cout << ui::tag("-", ui::ASH) << ' ' << ui::paint("no files found", ui::ASH) << '\n';
+        return 0;
     }
 
-    std::cout << '|' + std::string(maxNameSize+2, '-') + "|" +
-                std::string(maxSizeSize+2, '-') + "|" +
-                std::string(maxDateSize+2, '-') + "|" +
-                std::string(files[0].getHash().size()+1, '-') + "\n\n";
+    // ── Measure ──────────────────────────────────────────────────────────
+    struct Row { std::string name, size, date, hash; const char* sizeCol; };
+    size_t wName = 4, wSize = 4, wDate = 8, wHash = 4;
+    std::vector<Row> rows;
+    rows.reserve(files.size());
 
-    std::cout.flush();
+    decltype(files[0].getSize()) total{};
+    for ( auto& f : files ) {
+        Row r{ f.getName(), humanReadableSize(f.getSize()), f.getCreationDateString_c(),
+               f.getHash(),
+               ui::sizeColor(static_cast<double>(f.getSize())) };
+        wName = std::max(wName, ui::displayWidth(r.name));
+        wSize = std::max(wSize, ui::displayWidth(r.size));
+        wDate = std::max(wDate, ui::displayWidth(r.date));
+        wHash = std::max(wHash, ui::displayWidth(r.hash));
+        total += f.getSize();
+        rows.push_back(std::move(r));
+    }
 
+    // ── Layout: hash inline if it fits, otherwise on its own └─ line ─────
+    const size_t gapW = 2, indent = 2;
+    const size_t termW = ui::terminalWidth();
+    const size_t inlineW = indent + wName + wSize + wDate + wHash + 3 * gapW;
+    const bool inlineHash = termW == 0 || inlineW <= termW;
+    const std::string gap(gapW, ' '), pad(indent, ' ');
+
+    // ── Header ───────────────────────────────────────────────────────────
+    //  :: files (3)  // 813.2 MB total
+    std::cout << '\n' << ui::paint("::", ui::RUST) << ' ' << ui::paint("files", ui::BOLD)
+              << ui::paint(" (" + std::to_string(files.size()) + ")  // " + humanReadableSize(total) + " total", ui::ASH)
+              << "\n\n";
+
+    std::string head = pad + ui::paint("name", ui::ASH) + ui::spaces(wName - 4) + gap
+                     + ui::spaces(wSize - 4) + ui::paint("size", ui::ASH) + gap
+                     + ui::paint("uploaded", ui::ASH) + ui::spaces(wDate - 8);
+    std::string rule = pad + ui::paint(ui::repeat("─", wName), ui::ASH) + gap
+                     + ui::paint(ui::repeat("─", wSize), ui::ASH) + gap
+                     + ui::paint(ui::repeat("─", wDate), ui::ASH);
+    if ( inlineHash ) {
+        head += gap + ui::paint("hash", ui::ASH);
+        rule += gap + ui::paint(ui::repeat("─", wHash), ui::ASH);
+    }
+    std::cout << head << '\n' << rule << '\n';
+
+    // ── Rows ─────────────────────────────────────────────────────────────
+    for ( const auto& r : rows ) {
+        std::cout << pad << ui::styledName(r.name) << ui::spaces(wName - ui::displayWidth(r.name)) << gap
+                  << ui::spaces(wSize - ui::displayWidth(r.size)) << ui::paint(r.size, r.sizeCol) << gap
+                  << ui::paint(r.date, ui::ASH);
+        if ( inlineHash ) {
+            std::cout << ui::spaces(wDate - ui::displayWidth(r.date)) << gap << ui::paint(r.hash, ui::RUST) << '\n';
+        } else {
+            std::cout << '\n' << pad << ui::paint("└─ ", ui::ASH) << ui::paint(r.hash, ui::RUST) << '\n';
+        }
+    }
+
+    std::cout << std::endl;
     return 0;
 }

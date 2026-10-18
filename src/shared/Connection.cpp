@@ -185,9 +185,18 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 void Connection::_send ( const char* message, const size_t length ) {
 	std::lock_guard<std::mutex> lock(_sendMutex);
 
-	size_t written = 0;
-	if ( !SSL_write_ex(_ssl, message, length, &written) || written != length ) {
-		throw std::runtime_error("Could not send message");
+	size_t totalWritten = 0;
+	while ( totalWritten < length ) {
+		size_t written = 0;
+		const auto ret = SSL_write_ex(_ssl, message + totalWritten, length - totalWritten, &written);
+		if ( ret <= 0 ) {
+			const int err = SSL_get_error(_ssl, ret);
+			if ( err == SSL_ERROR_WANT_WRITE || err == SSL_ERROR_WANT_READ ) {
+				continue;
+			}
+			throw std::runtime_error("Could not send message");
+		}
+		totalWritten += written;
 	}
 }
 
