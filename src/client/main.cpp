@@ -54,6 +54,40 @@ Endpoint parseEndpoint ( std::string s ) {
     return ep;
 }
 
+void saveServer ( const std::string& server ) {
+    if ( server.empty() ) return;
+    try {
+        std::filesystem::path targetFile = "/usr/share/hikup";
+        if ( std::filesystem::exists(targetFile) && std::filesystem::is_directory(targetFile) ) {
+            targetFile /= "servers";
+        }
+
+        if ( std::filesystem::exists(targetFile) && std::filesystem::is_regular_file(targetFile) ) {
+            std::ifstream in(targetFile);
+            std::string line;
+            while ( std::getline(in, line) ) {
+                auto start = line.find_first_not_of(" \t\r\n");
+                if ( start == std::string::npos ) continue;
+                auto end = line.find_last_not_of(" \t\r\n");
+                line = line.substr(start, end - start + 1);
+                if ( line == server ) {
+                    return; // already recorded
+                }
+            }
+        }
+
+        if ( targetFile.has_parent_path() ) {
+            std::filesystem::create_directories(targetFile.parent_path());
+        }
+        std::ofstream out(targetFile, std::ios::app);
+        if ( out.is_open() ) {
+            out << server << '\n';
+        }
+    } catch ( ... ) {
+        // Silently ignore filesystem / permission errors
+    }
+}
+
 } // namespace
 
 int start ( int argc, char* argv[] ) {
@@ -81,7 +115,8 @@ int start ( int argc, char* argv[] ) {
         return 1;
     }
 
-    const auto ep = parseEndpoint(command.contains(Command::Type::LIST) ? argv[4] : argv[3]);
+    const std::string rawServer = command.contains(Command::Type::LIST) ? argv[4] : argv[3];
+    const auto ep = parseEndpoint(rawServer);
 
     Connection connection;
 
@@ -102,6 +137,7 @@ int start ( int argc, char* argv[] ) {
 
         try {
             connection.connectToServer(ep.host, ep.port, SSLVerifyCert);
+            saveServer(rawServer);
         } catch ( std::runtime_error& e ) {
             fail(e.what());
             return 1;
@@ -129,6 +165,7 @@ int start ( int argc, char* argv[] ) {
 
         if ( !quiet ) step("connecting", ep.host + ":" + std::to_string(ep.port));
         connection.connectToServer(ep.host, ep.port, SSLVerifyCert);
+        saveServer(rawServer);
         if ( !quiet ) done("connected");
     }
     catch ( std::runtime_error& e ) {

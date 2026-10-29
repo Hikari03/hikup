@@ -81,3 +81,25 @@ add_executable(hikup-server src/server/main.cpp
 find_package(OpenSSL REQUIRED)
 target_link_libraries(hikup OpenSSL::SSL)
 target_link_libraries(hikup-server OpenSSL::SSL)
+
+include(GNUInstallDirs)
+
+install(TARGETS hikup hikup-server
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+install(FILES hikup-completion.bash
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
+        RENAME hikup)
+
+install(CODE "
+    execute_process(COMMAND id -un OUTPUT_VARIABLE CURRENT_USER OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND id -gn OUTPUT_VARIABLE CURRENT_GROUP OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(DEST_DIR \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/hikup\")
+    set(DEST_FILE \"\${DEST_DIR}/servers\")
+    file(MAKE_DIRECTORY \"\${DEST_DIR}\")
+    if(NOT EXISTS \"\${DEST_FILE}\")
+        file(TOUCH \"\${DEST_FILE}\")
+    endif()
+    execute_process(COMMAND chown \"\${CURRENT_USER}:\${CURRENT_GROUP}\" \"\${DEST_DIR}\" \"\${DEST_FILE}\"
+                    ERROR_QUIET OUTPUT_QUIET)
+")

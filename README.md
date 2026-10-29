@@ -114,6 +114,6 @@ cmake --build build --target hikup-server -j $(nproc)
 Use `*-static`flavours of scripts for this. Ensure that you have static library of OpenSSL.
 
 # Acknowledgements
-- [libsodium](https://github.com/jedisct1/libsodium) for encryption
+- [openssl](https://github.com/openssl/openssl) for encryption
 - [mongoose](https://github.com/cesanta/mongoose) for web server
 - [toml++](https://github.com/marzer/tomlplusplus) for config parsing
