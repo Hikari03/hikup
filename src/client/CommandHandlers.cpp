@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "Color.hpp"     // drop if nothing else in this file uses colorize()
+#include "E2E.hpp"
 #include "util.cpp"
 #include "Style.hpp"
 #include "../shared/FileInfo.hpp"
@@ -32,7 +33,7 @@ namespace ui {
 
 
 // ═════════════════════════════════════════════════════════════════════════
-void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection, const bool quiet ) {
+void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection, const bool quiet, const std::string& e2eKey ) {
     if ( !file.good() ) { ui::fail("could not open file"); return; }
 
     using clock = std::chrono::steady_clock;
@@ -103,6 +104,7 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
 
     if ( quiet ) {
         std::cout << "hash: " << hash << '\n';
+        if ( !e2eKey.empty() ) std::cout << "key: " << e2eKey << '\n';
         if ( httpExists ) std::cout << "http: " << httpLink << "\n\n";
         return;
     }
@@ -111,8 +113,10 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
     std::vector<ui::Field> fields = {
         { "time", ui::formatDuration(wall.count()) + " @ " + humanReadableSpeed(avg), ui::SAND },
         { "hash", hash, ui::RUST },
-        { "link", httpExists ? httpLink : "not available",                       httpExists ? ui::AMBER : ui::ASH },
     };
+    if ( !e2eKey.empty() )
+        fields.push_back({ "key", e2eKey, ui::AMBER });
+    fields.push_back({ "link", httpExists ? httpLink : "not available",                       httpExists ? ui::AMBER : ui::ASH });
 #ifdef HIKUP_DEBUG
     fields.push_back({ "chunk", humanReadableSize(chunkSize), ui::ASH });
 #endif
@@ -120,7 +124,8 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-void CommandHandlers::downloadFile ( Connection& connection, const bool quiet ) {
+std::string CommandHandlers::downloadFile ( Connection& connection, const bool quiet,
+                                             const std::filesystem::path& destination, const bool summary ) {
     using clock = std::chrono::steady_clock;
 
     const auto fileSize = std::stoll(connection.receiveInternal());
@@ -130,16 +135,20 @@ void CommandHandlers::downloadFile ( Connection& connection, const bool quiet ) 
     const std::string fileName = std::filesystem::path(connection.receiveInternal()).filename().string();
     if ( fileName.empty() || fileName == "." || fileName == ".." ) {
         ui::fail("server sent an invalid file name");
-        return;
+        return {};
     }
+
+    const std::filesystem::path outputPath = destination.empty()
+                                                 ? std::filesystem::path(fileName)
+                                                 : destination;
 
     const unsigned long freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4),
                                              static_cast<unsigned long>(4 * 1024 * 1024),
                                              static_cast<unsigned long>(64 * 1024 * 1024));
     connection.resizeBuffer(freeRam);
 
-    std::ofstream file(fileName, std::ios::binary);
-    if ( !file ) { ui::fail("could not create " + fileName); return; }
+    std::ofstream file(outputPath, std::ios::binary);
+    if ( !file ) { ui::fail("could not create " + outputPath.string()); return {}; }
 
     const bool showProgress = !quiet && ui::g_tty;
     const size_t termW = ui::terminalWidth();
@@ -171,8 +180,8 @@ void CommandHandlers::downloadFile ( Connection& connection, const bool quiet ) 
         ui::fail(std::string("download failed: ") + e.what());
         file.close();
         std::error_code ec;
-        std::filesystem::remove(fileName, ec);          // no partial files
-        return;
+        std::filesystem::remove(outputPath, ec);         // no partial files
+        return {};
     }
 
     const std::chrono::duration<double> wall = clock::now() - start;
@@ -182,13 +191,76 @@ void CommandHandlers::downloadFile ( Connection& connection, const bool quiet ) 
 
     connection.sendInternal("OK");
 
-    if ( quiet ) return;
+    if ( quiet || !summary )
+        return fileName;
 
     const double avg = wall.count() > 0 ? double(total) / wall.count() : 0.0;
     ui::printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("downloaded", ui::BOLD) + " " + ui::styledName(fileName), {
                       { "size", humanReadableSize(fileSize), ui::AMBER },
                       { "time", ui::formatDuration(wall.count()) + " @ " + humanReadableSpeed(avg), ui::SAND  },
                   });
+    return fileName;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+int CommandHandlers::downloadFileE2E ( Connection& connection, const std::string& key, const bool quiet ) {
+    // download the ciphertext into a temporary file, then decrypt in place
+    const auto temp = std::filesystem::temp_directory_path()
+                   / ( "hikup-e2e-" + std::to_string(::getpid()) + "-download.tmp" );
+
+    const std::string name = downloadFile(connection, quiet, temp, false);
+
+    std::error_code ec;
+    if ( name.empty() ) {
+        std::filesystem::remove(temp, ec);
+        return 1;
+    }
+
+    try {
+        E2E::decryptFile(temp, key, name, quiet);
+    } catch ( const std::exception& e ) {
+        ui::fail(e.what());
+        std::filesystem::remove(temp, ec);
+        std::filesystem::remove(name, ec);               // no partial plaintext
+        return 1;
+    }
+
+    std::filesystem::remove(temp, ec);
+
+    if ( !quiet ) {
+        ui::printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("downloaded", ui::BOLD) + " " + ui::styledName(name) + ' '
+                         + ui::paint("(decrypted)", ui::ASH), {
+                          { "size", humanReadableSize(std::filesystem::file_size(name)), ui::AMBER },
+                      });
+    }
+    return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+int CommandHandlers::infoFile ( Connection& connection, const bool quiet ) {
+    std::string encoded;
+    try {
+        encoded = connection.receiveData();
+    } catch ( const std::exception& e ) {
+        ui::fail(std::string("error receiving file info: ") + e.what());
+        return 1;
+    }
+
+    FileInfo file(encoded);
+
+    if ( quiet ) {
+        const auto uploaded = std::chrono::duration_cast<std::chrono::seconds>(
+                                  file.getCreationDateUTC().time_since_epoch()).count();
+        std::cout << file.getName() << ' ' << file.getSize() << ' ' << uploaded << '\n';
+        return 0;
+    }
+
+    ui::printTree(ui::tag("*", ui::RUST) + ' ' + ui::paint("info", ui::BOLD) + ' ' + ui::styledName(file.getName()), {
+                      { "size",     humanReadableSize(file.getSize()), ui::AMBER },
+                      { "uploaded", file.getCreationDateString_c(),    ui::SAND  },
+                      { "hash",     file.getHash(),                    ui::RUST  },
+                  });
+    return 0;
 }
 
 // ═════════════════════════════════════════════════════════════════════════

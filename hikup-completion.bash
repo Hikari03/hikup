@@ -24,7 +24,10 @@ _hikup() {
 
     local commands=(
         up qup vup qvup vqup
+        eup qeup veup qveup vqeup
         down qdown vdown qvdown vqdown
+        edown qedown vedown qvedown vqedown
+        info qinfo vinfo qvinfo vqinfo
         rm qrm vrm qvrm vqrm
         ls qls vls qvls vqls
     )
@@ -59,7 +62,7 @@ _hikup() {
                 return 0
             fi
             ;;
-        *down*|*rm*)
+        *down*|*rm*|*info*)
             if [[ $cword -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "-" -- "$cur") )
                 return 0

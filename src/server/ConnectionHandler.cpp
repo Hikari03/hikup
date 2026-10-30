@@ -45,6 +45,8 @@ void ConnectionHandler::_serveConnection ( ClientInfo client ) {
 			_handleRemoveFile(connection);
 		else if ( message == "command:LIST" )
 			_handleListFiles(connection);
+		else if ( message == "command:INFO" )
+			_handleInfo(connection);
 		else if ( message == "command:SYNC" )
 			_syncAsSlave(connection);
 		else if ( message == "command:BATCH_UPLOAD")
@@ -339,6 +341,31 @@ void ConnectionHandler::_handleListFiles ( ConnectionServer& connection ) const 
 	}
 
 	connection.sendInternal("DONE");
+}
+
+void ConnectionHandler::_handleInfo ( ConnectionServer& connection ) const {
+	const auto hash = connection.receiveInternal().substr(strlen("hash:"));
+
+	std::filesystem::path fileName;
+
+	for ( const auto& file: std::filesystem::directory_iterator("storage") )
+		if ( file.path().extension() == '.' + hash )
+			fileName = file.path();
+
+	if ( fileName.empty() ) {
+		Utils::log("_handleInfo: file not found");
+		connection.sendInternal("File not found");
+		return;
+	}
+
+	if ( !_readyFiles.list().contains(hash) ) {
+		Utils::log("_handleInfo: file is being uploaded");
+		connection.sendInternal("File is being uploaded, try again later");
+		return;
+	}
+
+	connection.sendInternal("OK");
+	connection.sendData(FileInfo(fileName, true).encode());
 }
 
 void ConnectionHandler::_handleBatchReceiveFile ( ConnectionServer& connection ) {

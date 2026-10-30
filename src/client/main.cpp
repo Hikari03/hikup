@@ -9,6 +9,7 @@
 #include "BatchHandlers.hpp"
 #include "CommandHandlers.hpp"
 #include "CommandType.hpp"
+#include "E2E.hpp"
 #include "Style.hpp"
 #include "../shared/Connection.hpp"
 
@@ -27,11 +28,16 @@ void printHelp ( const std::string& argv0 ) {
         << "  " << note("commands") << '\n'
         << "    " << cmd("up")   << "  <file>        upload a file, prints its hash\n"
         << "    " << cmd("down") << "  <hash>        download by hash\n"
+        << "    " << cmd("info") << "  <hash>        show file info (name, size, upload date)\n"
         << "    " << cmd("rm")   << "    <hash>        remove by hash\n"
         << "    " << cmd("ls")   << "    <user> <pass> list files (credentials from server settings)\n\n"
         << "  " << note("modifiers") << " (prefix the command, e.g. qup)\n"
         << "    " << cmd("q") << "   quiet, no decoration, output is only hash/link\n"
-        << "    " << cmd("v") << "   force TLS certificate verification\n\n"
+        << "    " << cmd("v") << "   force TLS certificate verification\n"
+        << "    " << cmd("e") << "   end-to-end encryption (only for up/down)\n"
+        << "         " << note("up") << "   encrypts locally, prints the key\n"
+        << "         " << note("down") << " decrypts after download, needs " << cmd("<hash>#<key>") << '\n'
+        << "         " << note("the server only ever stores ciphertext") << "\n\n"
         << "  " << note("batch") << '\n'
         << "    use " << cmd("-") << " instead of file/hash and pipe a space/newline separated list to stdin\n\n"
         << "  " << note("http") << '\n'
@@ -88,6 +94,17 @@ void saveServer ( const std::string& server ) {
     }
 }
 
+// removes the e2e temporary ciphertext on every exit path (RAII)
+struct TempCleaner {
+    std::filesystem::path path;
+    ~TempCleaner () {
+        if ( !path.empty() ) {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
+    }
+};
+
 } // namespace
 
 int start ( int argc, char* argv[] ) {
@@ -100,12 +117,28 @@ int start ( int argc, char* argv[] ) {
 
     const bool SSLVerifyCert = command.contains(Command::Type::SSL_VERIFY_CERT);
     const bool quiet         = command.contains(Command::Type::QUIET);
+    const bool e2e           = command.contains(Command::Type::E2E);
 
     if ( !std::strcmp(argv[2], "-") )
         command.emplace(Command::Type::BATCH);
 
     if ( !Command::isValid(command) ) {
         fail("invalid command");
+        return 1;
+    }
+
+    if ( command.contains(Command::Type::INFO) && command.contains(Command::Type::BATCH) ) {
+        fail("info does not support batch mode, give a single hash");
+        return 1;
+    }
+
+    if ( e2e && !( command.contains(Command::Type::UPLOAD) || command.contains(Command::Type::DOWNLOAD) ) ) {
+        fail("e2e is only supported for up and down");
+        return 1;
+    }
+
+    if ( e2e && command.contains(Command::Type::BATCH) ) {
+        fail("e2e does not support batch mode, give a single file/hash");
         return 1;
     }
 
@@ -150,13 +183,32 @@ int start ( int argc, char* argv[] ) {
     std::ifstream file;
     std::ifstream::pos_type fileSize{};
     std::string fileName, hash;
+    std::filesystem::path e2eTempFile;
+    std::string e2eKey;
+    TempCleaner e2eCleanup;   // removes the ciphertext temp file on any exit
 
     try {
         if ( command.contains(Command::Type::UPLOAD) ) {
-            auto [_file, _fileSize, _fileName] = resolveFile(argv[2]);
-            file     = std::move(_file);
-            fileSize = _fileSize;
-            fileName = _fileName;
+            const std::filesystem::path sourcePath = std::filesystem::absolute(argv[2]);
+
+            if ( e2e ) {
+                if ( !quiet ) step("encrypting", sourcePath.filename().string());
+                auto [temp, key] = E2E::encryptFile(sourcePath, quiet);
+                e2eTempFile    = temp;
+                e2eCleanup.path = temp;
+                e2eKey          = key;
+                fileName    = sourcePath.filename().string();   // keep the original name
+                fileSize    = std::filesystem::file_size(e2eTempFile);
+                file.open(e2eTempFile, std::ios::binary);
+                if ( !file ) throw std::runtime_error("could not reopen the encrypted file");
+                if ( !quiet ) done("encrypted", "with a fresh key");
+            }
+            else {
+                auto [_file, _fileSize, _fileName] = resolveFile(argv[2]);
+                file     = std::move(_file);
+                fileSize = _fileSize;
+                fileName = _fileName;
+            }
 
             if ( !quiet ) step("hashing", fileName);
             hash = computeHash(file, fileSize, quiet);
@@ -180,8 +232,22 @@ int start ( int argc, char* argv[] ) {
         connection.sendInternal("filename:" + fileName);
         connection.sendInternal("hash:" + hash);
     }
-    else if ( command.contains(Command::Type::DOWNLOAD) || command.contains(Command::Type::REMOVE) ) {
+    else if ( command.contains(Command::Type::DOWNLOAD) || command.contains(Command::Type::REMOVE)
+              || command.contains(Command::Type::INFO) ) {
         fileName = argv[2];                                  // here: the hash
+
+        if ( e2e && command.contains(Command::Type::DOWNLOAD) ) {
+            // the e2e key rides along with the hash: <hash>#<key>
+            if ( const size_t pos = fileName.find('#'); pos != std::string::npos ) {
+                e2eKey = fileName.substr(pos + 1);
+                fileName.resize(pos);
+            }
+            if ( e2eKey.empty() ) {
+                fail("e2e download needs the key: use <hash>#<key> (as printed by the uploader)");
+                return 1;
+            }
+        }
+
         connection.sendInternal("hash:" + fileName);
     }
 
@@ -211,9 +277,14 @@ int start ( int argc, char* argv[] ) {
 
     // ── Dispatch ─────────────────────────────────────────────────────────
     if ( command.contains(Command::Type::UPLOAD) )
-        CommandHandlers::sendFile(file, fileSize, connection, quiet);
-    else if ( command.contains(Command::Type::DOWNLOAD) )
+        CommandHandlers::sendFile(file, fileSize, connection, quiet, e2eKey);
+    else if ( command.contains(Command::Type::DOWNLOAD) ) {
+        if ( e2e )
+            return CommandHandlers::downloadFileE2E(connection, e2eKey, quiet);
         CommandHandlers::downloadFile(connection, quiet);
+    }
+    else if ( command.contains(Command::Type::INFO) )
+        return CommandHandlers::infoFile(connection, quiet);
     else if ( command.contains(Command::Type::LIST) )
         return CommandHandlers::listFiles(connection, argv[2], argv[3]);
 

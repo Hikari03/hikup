@@ -10,9 +10,11 @@ namespace Command {
 		DOWNLOAD,
 		REMOVE,
 		LIST,
+		INFO,
 		BATCH,
 		QUIET,
 		SSL_VERIFY_CERT,
+		E2E,
 		INVALID
 	};
 

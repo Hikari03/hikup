@@ -8,6 +8,7 @@
 
 - **File Management**: Effortlessly upload, download, and remove files with just one command.
 - **Secure Transfer**: All data transfers between the client and server are encrypted using QUIC to ensure data integrity and privacy. (man-in-the-middle attack not possible with installed certificates)
+- **Optional End-to-End Encryption**: Add `e` to the command (`eup`/`edown`) to encrypt files on the client before upload. The server only ever stores ciphertext (AES-256-GCM); the key is printed after upload and shared out-of-band.
 - **File Sharing in Three Simple Steps**:
     1. Upload the desired file to the server and receive a unique hash and HTTP link.
     2. Share the generated hash or link with designated recipients.
@@ -22,10 +23,17 @@
 - `hikup`: Display help information about the commands.
 - `hikup up <file> <server-address>[:port]`: Upload a file.
 - `hikup down <file> <server-address>[:port]`: Download a file.
+- `hikup info <hash> <server-address>[:port]`: Show file metadata (name, size, upload date) without downloading it.
 - `hikup rm <file> <server-address>[:port]`: Remove a file.
 - `hikup ls <user> <pass> <server-address>[:port]`: List all files (requires authentication).
 - add `q` into first argument for quiet run: like qup, qdown, ...
 - add `v` to force TLS to verify server certificate
+- add `e` for end-to-end encryption (only for `up` and `down`):
+    - `hikup eup <file> <server-address>[:port]`: encrypt locally with a fresh key, upload only ciphertext, print hash and key
+    - `hikup edown <hash>#<key> <server-address>[:port]`: download the ciphertext and decrypt it locally
+
+> [!NOTE]
+> With end-to-end encryption the server (and its HTTP link) only serves ciphertext; the file name and size remain visible to the server. Without the key the file cannot be decrypted.
 
 > [!NOTE]
 > When an operation with more files at once is desired, pipe space or new-line separated list of files/hashes into program and in arguments enter `-` in the normal place.
