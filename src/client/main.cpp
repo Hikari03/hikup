@@ -286,7 +286,7 @@ int start ( int argc, char* argv[] ) {
     else if ( command.contains(Command::Type::INFO) )
         return CommandHandlers::infoFile(connection, quiet);
     else if ( command.contains(Command::Type::LIST) )
-        return CommandHandlers::listFiles(connection, argv[2], argv[3]);
+        return CommandHandlers::listFiles(connection, argv[2], argv[3], quiet);
 
     return 0;
 }

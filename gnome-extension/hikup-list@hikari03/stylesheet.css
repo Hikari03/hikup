@@ -1,0 +1,123 @@
+/* hikup-list — aero glass
+   NOTE: St paints box-shadows as rectangles (they ignore border-radius),
+   so all glow effects are done with gradients only. */
+
+/* ── panel indicator ──────────────────────────────────────────────────── */
+.hikup-panel-button StIcon {
+    color: #38bdf8;                     /* aero sky */
+}
+
+.hikup-panel-label {
+    color: #9debff;                     /* luminous glass */
+    font-weight: 600;
+}
+
+/* ── separators: fading glass edges ───────────────────────────────────── */
+.hikup-menu .popup-separator-menu-item {
+    -gradient-start: rgba(157, 235, 255, 0.28);
+    -gradient-end: rgba(157, 235, 255, 0.0);
+}
+
+/* ── server header rows ───────────────────────────────────────────────── */
+.hikup-server-item {
+    border-radius: 12px;
+    spacing: 8px;
+}
+
+.hikup-server-item:hover,
+.hikup-server-item:focus {
+    background-gradient-direction: vertical;
+    background-gradient-start: rgba(56, 189, 248, 0.22);
+    background-gradient-end: rgba(215, 243, 255, 0.06);
+}
+
+/* ── dim server info line inside a submenu ────────────────────────────── */
+.hikup-info-item {
+    color: #8aabbf;                     /* frosted steel */
+    font-size: 0.95em;
+}
+
+/* ── file rows ────────────────────────────────────────────────────────── */
+.hikup-file-item {
+    spacing: 8px;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.hikup-file-item:hover,
+.hikup-file-item:focus {
+    background-gradient-direction: vertical;
+    background-gradient-start: rgba(56, 189, 248, 0.20);
+    background-gradient-end: rgba(215, 243, 255, 0.06);
+}
+
+.hikup-file-name {
+    color: #e9f6ff;                     /* ice white */
+}
+
+.hikup-file-meta {
+    color: #8aabbf;
+    font-size: 0.95em;
+    font-feature-settings: 'tnum';
+}
+
+/* ── glass action buttons ─────────────────────────────────────────────── */
+.hikup-action-button {
+    border-radius: 999px;
+    padding: 5px;
+    border: 1px solid rgba(157, 235, 255, 0.35);
+    background-gradient-direction: vertical;
+    background-gradient-start: rgba(56, 189, 248, 0.30);
+    background-gradient-end: rgba(14, 165, 233, 0.14);
+}
+
+.hikup-action-button:hover,
+.hikup-action-button:focus {
+    border-color: rgba(215, 243, 255, 0.6);
+    background-gradient-start: rgba(157, 235, 255, 0.55);
+    background-gradient-end: rgba(56, 189, 248, 0.28);
+}
+
+.hikup-action-icon {
+    icon-size: 14px;
+    color: #9debff;
+}
+
+/* ── filter box ────────────────────────────────────────────────────────── */
+.hikup-filter-item {
+    padding: 2px 8px 6px 8px;
+}
+
+.hikup-filter-entry {
+    border-radius: 10px;
+    padding: 5px 10px;
+    border: 1px solid rgba(157, 235, 255, 0.22);
+    background-gradient-direction: vertical;
+    background-gradient-start: rgba(56, 189, 248, 0.10);
+    background-gradient-end: rgba(215, 243, 255, 0.03);
+    color: #e9f6ff;
+    caret-color: #38bdf8;
+}
+
+/* ── loading spinner ───────────────────────────────────────────────────── */
+.hikup-spinner {
+    icon-size: 16px;
+    color: #38bdf8;
+}
+
+/* ── error state ──────────────────────────────────────────────────────── */
+.hikup-error-item {
+    color: #ff9aa8;                     /* glass rose */
+    font-size: 0.95em;
+}
+
+.hikup-retry-button {
+    border-radius: 8px;
+    padding: 2px 12px;
+    margin: 2px 0 6px 12px;
+}
+
+/* ── file type icon ────────────────────────────────────────────────────── */
+.hikup-file-icon {
+    icon-size: 20px;
+}

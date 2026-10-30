@@ -264,7 +264,7 @@ int CommandHandlers::infoFile ( Connection& connection, const bool quiet ) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-int CommandHandlers::listFiles ( Connection& connection, const std::string& user, const std::string& pass ) {
+int CommandHandlers::listFiles ( Connection& connection, const std::string& user, const std::string& pass, const bool quiet ) {
     connection.sendInternal("user:" + user);
     connection.sendInternal("pass:" + pass);
 
@@ -282,6 +282,18 @@ int CommandHandlers::listFiles ( Connection& connection, const std::string& user
     } catch ( std::runtime_error& e ) {
         ui::fail(std::string("error receiving file list: ") + e.what());
         return 1;
+    }
+
+    if ( quiet ) {
+        // machine-readable output for scripts (and the GNOME extension):
+        // one line per file: name \t size in bytes \t upload date (epoch seconds) \t hash
+        for ( const auto& file: files ) {
+            const auto uploaded = std::chrono::duration_cast<std::chrono::seconds>(
+                                      file.getCreationDateUTC().time_since_epoch()).count();
+            std::cout << file.getName() << '\t' << file.getSize() << '\t' << uploaded << '\t'
+                      << file.getHash() << '\n';
+        }
+        return 0;
     }
 
     if ( files.empty() ) {
