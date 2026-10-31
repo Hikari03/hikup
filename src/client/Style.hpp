@@ -113,11 +113,11 @@ inline std::string tag(const char* sym, const char* color) {
 
 inline void step(const std::string& msg, const std::string& detail = "") {
     std::cout << tag("*", RUST) << ' ' << msg
-              << (detail.empty() ? "" : "  " + paint(detail, ASH)) << '\n';
+              << (detail.empty() ? "" : "  " + paint(detail, ASH)) << std::endl;
 }
 inline void done(const std::string& msg, const std::string& detail = "") {
     std::cout << tag("+", MOSS) << ' ' << msg
-              << (detail.empty() ? "" : "  " + paint(detail, ASH)) << '\n';
+              << (detail.empty() ? "" : "  " + paint(detail, ASH)) << std::endl;
 }
 inline void fail(const std::string& msg) {
     std::cerr << tag("!", BRICK) << ' ' << msg << std::endl;

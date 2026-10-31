@@ -218,6 +218,10 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 
 	connection.sendInternal(clientFileName);
 
+	// the client acknowledges the headers before the raw stream starts, so
+	// raw data can never coalesce into its header reads (race → hang)
+	connection.receiveInternal();
+
 	Utils::log("sendFile: starting upload of size: " + humanReadableSize(fileSize));
 
 	size_t sizeRead = 0;

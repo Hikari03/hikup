@@ -150,6 +150,11 @@ std::string CommandHandlers::downloadFile ( Connection& connection, const bool q
         return {};
     }
 
+    // tell the server we consumed all header messages and are ready for the
+    // raw stream — without this, raw data can coalesce into the header reads
+    // and the client waits forever for a message end-marker (race)
+    connection.sendInternal("OK");
+
     std::filesystem::path outputPath;
     if ( destination.empty() )
         outputPath = fileName;                        // current directory

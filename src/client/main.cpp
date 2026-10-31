@@ -295,8 +295,6 @@ int start ( int argc, char* argv[] ) {
 }
 
 int main ( const int argc, char* argv[] ) {
-    std::ios::sync_with_stdio(false);
-    std::cin.tie(nullptr);
 
     try { return start(argc, argv); }
     catch ( std::exception& e ) {
