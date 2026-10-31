@@ -3,5 +3,5 @@
     "name": "Hikup Files",
     "description": "List files stored on your hikup servers, straight from the panel. Clicking a file copies its download command.",
     "shell-version": ["46", "47", "48", "49", "50", "51"],
-    "version": 2
+    "version": 3
 }

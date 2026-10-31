@@ -208,9 +208,6 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 
 	connection.sendInternal("OK");
 
-	size_t chunkSize = 4 * 1024 * 1024;
-	auto buffer = std::make_unique<char[]>(chunkSize);
-
 	connection.sendInternal(std::to_string(fileSize));
 
 	auto lastOfSlash = fileName.find_last_of('/');
@@ -224,14 +221,15 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 	Utils::log("sendFile: starting upload of size: " + humanReadableSize(fileSize));
 
 	size_t sizeRead = 0;
+	AdaptiveBuffer buffer;
 
 	while ( true ) {
-		file.read(buffer.get(), chunkSize);
-        auto bytesRead = file.gcount();
-        if (bytesRead == 0) break;
+		file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+		const auto bytesRead = static_cast<size_t>(file.gcount());
+		if ( bytesRead == 0 ) break;
 
 		const auto startUploadTime = std::chrono::high_resolution_clock::now();
-		connection.sendRaw(buffer.get(), bytesRead);
+		connection.sendRaw(buffer.data(), bytesRead);
 		const auto endUploadTime = std::chrono::high_resolution_clock::now();
 
 		std::chrono::duration<double> duration = endUploadTime - startUploadTime;
@@ -241,22 +239,7 @@ void ConnectionHandler::_handleSendFile ( ConnectionServer& connection ) {
 		if ( sizeRead == static_cast<unsigned long long>(fileSize) )
 			break;
 
-		// adjust chunk size based on duration
-		if ( duration.count() > 1.0 ) {
-			// decrease chunkSize by 25%
-			chunkSize = static_cast<size_t>(chunkSize * 0.75);
-			if (chunkSize < 1024 * 1024) chunkSize = 1024 * 1024;
-
-			buffer = std::make_unique<char[]>(chunkSize);
-		}
-		else if ( duration.count() < 0.2 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<size_t>(chunkSize * 2);
-			buffer = std::make_unique<char[]>(chunkSize);
-		}
-		else if ( duration.count() < 0.4 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<size_t>(chunkSize * 1.25);
-			buffer = std::make_unique<char[]>(chunkSize);
-		}
+		buffer.reportSendDuration(duration.count(), freeRam);
 	}
 
 	connection.receiveInternal();
@@ -416,19 +399,18 @@ void ConnectionHandler::_sendFileInSync ( T& connection, const std::string& file
 	}
 
 	std::ifstream file(_path, std::ios::binary);
-	size_t chunkSize = 4 * 1024 * 1024;
-	auto buffer = std::make_unique<char[]>(chunkSize);
 	size_t sizeRead = 0;
+	AdaptiveBuffer buffer;
 	const auto freeRamLimit = 64 * 1024 * 1024; // 64 MB
 	const auto freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4), static_cast<unsigned long>(4 * 1024 * 1024), static_cast<unsigned long>(freeRamLimit));
 
 	while ( true ) {
-		file.read(buffer.get(), chunkSize);
-        auto bytesRead = file.gcount();
-        if (bytesRead == 0) break;
+		file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+		const auto bytesRead = static_cast<size_t>(file.gcount());
+		if ( bytesRead == 0 ) break;
 
 		const auto startUploadTime = std::chrono::high_resolution_clock::now();
-		connection.sendRaw(buffer.get(), bytesRead);
+		connection.sendRaw(buffer.data(), bytesRead);
 		const auto endUploadTime = std::chrono::high_resolution_clock::now();
 
 		std::chrono::duration<double> duration = endUploadTime - startUploadTime;
@@ -438,22 +420,7 @@ void ConnectionHandler::_sendFileInSync ( T& connection, const std::string& file
 		if ( sizeRead == static_cast<unsigned long long>(fileSize) )
 			break;
 
-		// adjust chunk size based on duration
-		if ( duration.count() > 1.0 ) {
-			// decrease chunkSize by 25%
-			chunkSize = static_cast<size_t>(chunkSize * 0.75);
-			if (chunkSize < 1024 * 1024) chunkSize = 1024 * 1024;
-
-			buffer = std::make_unique<char[]>(chunkSize);
-		}
-		else if ( duration.count() < 0.2 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<size_t>(chunkSize * 2);
-			buffer = std::make_unique<char[]>(chunkSize);
-		}
-		else if ( duration.count() < 0.4 && freeRam >= chunkSize * 2 ) {
-			chunkSize = static_cast<size_t>(chunkSize * 1.25);
-			buffer = std::make_unique<char[]>(chunkSize);
-		}
+		buffer.reportSendDuration(duration.count(), freeRam);
 	}
 
 }

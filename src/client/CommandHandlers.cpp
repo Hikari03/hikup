@@ -43,11 +43,20 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
                                              static_cast<unsigned long>(8 * 1024 * 1024),
                                              static_cast<unsigned long>(64 * 1024 * 1024));
 
-    size_t chunkSize = 8 * 1024 * 1024;
-    std::vector<char> buffer(chunkSize);
-
     double upTime = 0.0;
     unsigned long long sent = 0;
+
+    // machine-readable progress for wrappers (e.g. the GNOME extension):
+    // "PROGRESS <sent> <total>" lines on stdout, throttled to 50 ms
+    const bool progressEnv = std::getenv("HIKUP_PROGRESS") != nullptr;
+    auto lastProgress = clock::now() - std::chrono::seconds(1);
+
+    if ( progressEnv )
+        std::cout << "PROGRESS 0 " << total << '\n' << std::flush;
+
+    // start small so progress lands early and often; AdaptiveBuffer ramps the
+    // chunk back up on fast links (256 KB → 64 MB takes ~8 doublings)
+    AdaptiveBuffer buffer;
 
     const bool showProgress = !quiet && ui::g_tty;
     const size_t termW = ui::terminalWidth();
@@ -56,7 +65,7 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
     auto lastDraw = start - std::chrono::seconds(1);
 
     while ( sent < total ) {
-        file.read(buffer.data(), static_cast<std::streamsize>(chunkSize));
+        file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
         const auto got = static_cast<size_t>(file.gcount());
         if ( got == 0 ) break;                          // truncated file / read error
 
@@ -67,18 +76,21 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
         upTime += upDur.count();
         sent   += got;
 
+        if ( progressEnv && clock::now() - lastProgress >= std::chrono::milliseconds(50) ) {
+            std::cout << "PROGRESS " << sent << ' ' << total << '\n' << std::flush;
+            lastProgress = clock::now();
+        }
+
         if ( showProgress && clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
             ui::drawProgress("uploading", sent, total, upTime > 0 ? static_cast<double>(sent) / upTime : 0.0, termW);
             lastDraw = clock::now();
         }
 
-        size_t newSize = chunkSize;
-        if ( upDur.count() > 1.0 )                                  newSize = std::max<size_t>(1024 * 1024, chunkSize * 0.75);
-        else if ( upDur.count() < 0.2 && freeRam >= chunkSize * 2 ) newSize = chunkSize * 2;
-        else if ( upDur.count() < 0.4 && freeRam >= chunkSize * 2 ) newSize = chunkSize * 1.25;
-
-        if ( newSize != chunkSize ) { chunkSize = newSize; buffer.resize(chunkSize); }
+        buffer.reportSendDuration(upDur.count(), freeRam);
     }
+
+    if ( progressEnv )
+        std::cout << "PROGRESS " << sent << ' ' << total << '\n' << std::flush;
 
     const std::chrono::duration<double> wall = clock::now() - start;
     if ( showProgress ) ui::clearLine();
@@ -118,7 +130,7 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
         fields.push_back({ "key", e2eKey, ui::AMBER });
     fields.push_back({ "link", httpExists ? httpLink : "not available",                       httpExists ? ui::AMBER : ui::ASH });
 #ifdef HIKUP_DEBUG
-    fields.push_back({ "chunk", humanReadableSize(chunkSize), ui::ASH });
+    fields.push_back({ "chunk", humanReadableSize(buffer.size()), ui::ASH });
 #endif
     printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("uploaded", ui::BOLD) + " " + ui::paint(humanReadableSize(fileSize), ui::AMBER), fields);
 }
@@ -138,9 +150,13 @@ std::string CommandHandlers::downloadFile ( Connection& connection, const bool q
         return {};
     }
 
-    const std::filesystem::path outputPath = destination.empty()
-                                                 ? std::filesystem::path(fileName)
-                                                 : destination;
+    std::filesystem::path outputPath;
+    if ( destination.empty() )
+        outputPath = fileName;                        // current directory
+    else if ( std::filesystem::is_directory(destination) )
+        outputPath = destination / fileName;          // a directory: keep the server-side name
+    else
+        outputPath = destination;                     // an explicit file path
 
     const unsigned long freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4),
                                              static_cast<unsigned long>(4 * 1024 * 1024),
@@ -162,11 +178,24 @@ std::string CommandHandlers::downloadFile ( Connection& connection, const bool q
     const auto start = clock::now();
     auto lastDraw = start - std::chrono::seconds(1);
 
+    // machine-readable progress for wrappers (e.g. the GNOME extension):
+    // "PROGRESS <got> <total>" lines on stdout, throttled to 50 ms
+    const bool progressEnv = std::getenv("HIKUP_PROGRESS") != nullptr;
+    auto lastProgress = clock::now() - std::chrono::seconds(1);
+
+    if ( progressEnv )
+        std::cout << "PROGRESS 0 " << total << '\n' << std::flush;
+
     try {
         connection.receiveExact(fileSize, [&](const char* chunk, size_t size) {
             file.write(chunk, static_cast<std::streamsize>(size));
             if ( !file ) throw std::runtime_error("failed to write to disk");
             got += size;
+
+            if ( progressEnv && clock::now() - lastProgress >= std::chrono::milliseconds(50) ) {
+                std::cout << "PROGRESS " << got << ' ' << total << '\n' << std::flush;
+                lastProgress = clock::now();
+            }
 
             if ( showProgress && clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
                 const std::chrono::duration<double> el = clock::now() - start;
@@ -183,6 +212,9 @@ std::string CommandHandlers::downloadFile ( Connection& connection, const bool q
         std::filesystem::remove(outputPath, ec);         // no partial files
         return {};
     }
+
+    if ( progressEnv )
+        std::cout << "PROGRESS " << got << ' ' << total << '\n' << std::flush;
 
     const std::chrono::duration<double> wall = clock::now() - start;
     file.close();

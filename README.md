@@ -22,7 +22,7 @@
 ### Client Commands
 - `hikup`: Display help information about the commands.
 - `hikup up <file> <server-address>[:port]`: Upload a file.
-- `hikup down <file> <server-address>[:port]`: Download a file.
+- `hikup down <file> <server-address>[:port] [destination]`: Download a file; `destination` is an optional directory (keeps the server-side name) or file path, defaulting to the current directory.
 - `hikup info <hash> <server-address>[:port]`: Show file metadata (name, size, upload date) without downloading it.
 - `hikup rm <file> <server-address>[:port]`: Remove a file.
 - `hikup ls <user> <pass> <server-address>[:port]`: List all files (requires authentication).
@@ -34,6 +34,9 @@
 
 > [!NOTE]
 > With end-to-end encryption the server (and its HTTP link) only serves ciphertext; the file name and size remain visible to the server. Without the key the file cannot be decrypted.
+
+> [!NOTE]
+> If the `HIKUP_PROGRESS` environment variable is set, `hikup up` additionally prints one machine-readable `PROGRESS <sent> <total>` line per chunk to stdout while uploading (used by the GNOME extension).
 
 > [!NOTE]
 > When an operation with more files at once is desired, pipe space or new-line separated list of files/hashes into program and in arguments enter `-` in the normal place.

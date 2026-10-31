@@ -27,7 +27,7 @@ void printHelp ( const std::string& argv0 ) {
         << "  " << note("usage") << "   " << prog << " [q|v]" << cmd("<cmd>") << " <args> <server>[:port]\n\n"
         << "  " << note("commands") << '\n'
         << "    " << cmd("up")   << "  <file>        upload a file, prints its hash\n"
-        << "    " << cmd("down") << "  <hash>        download by hash\n"
+        << "    " << cmd("down") << "  <hash> [dir]  download by hash (dir: directory or file path)\n"
         << "    " << cmd("info") << "  <hash>        show file info (name, size, upload date)\n"
         << "    " << cmd("rm")   << "    <hash>        remove by hash\n"
         << "    " << cmd("ls")   << "    <user> <pass> list files (credentials from server settings)\n\n"
@@ -281,7 +281,10 @@ int start ( int argc, char* argv[] ) {
     else if ( command.contains(Command::Type::DOWNLOAD) ) {
         if ( e2e )
             return CommandHandlers::downloadFileE2E(connection, e2eKey, quiet);
-        CommandHandlers::downloadFile(connection, quiet);
+        const std::filesystem::path destination = argc > 4
+            ? std::filesystem::path(argv[4])
+            : std::filesystem::path{};
+        CommandHandlers::downloadFile(connection, quiet, destination);
     }
     else if ( command.contains(Command::Type::INFO) )
         return CommandHandlers::infoFile(connection, quiet);

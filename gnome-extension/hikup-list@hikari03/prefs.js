@@ -88,6 +88,21 @@ export default class HikupPreferences {
                 row.append(line);
             }
 
+            // verify TLS toggle — selects vup instead of up for uploads
+            const verifyRow = new Gtk.Box({spacing: 8});
+            verifyRow.append(new Gtk.Label({
+                label: 'Verify TLS (vup):',
+                xalign: 0,
+                width_request: 120,
+            }));
+            const check = new Gtk.CheckButton({active: !!server.verify});
+            check.connect('toggled', () => {
+                server.verify = check.active;
+                save();
+            });
+            verifyRow.append(check);
+            row.append(verifyRow);
+
             list.append(row);
         };
 

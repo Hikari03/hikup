@@ -57,10 +57,33 @@ stripped from `address` first).
   show the error with a "Try again" button.
 - Files are sorted newest first, each row showing its real file-type icon,
   name, size and upload time.
-- Per file row, two glass buttons:
+- Per file row, three glass buttons:
   - the copy button copies `hikup down <hash> <server>` to the clipboard
   - the link button copies the file's HTTP link
+  - the trash button removes the file (`hikup qrm`) — click once to arm
+    (it turns red), click again within 4 s to confirm
 - Clicking the row itself opens the file over HTTP in the default browser.
+
+## Uploading
+
+- Each server section starts with "Upload file…": it opens the system file
+  picker (via xdg-desktop-portal) and uploads the selection with `hikup qup`.
+- The per-server "Verify TLS (vup)" toggle in Settings switches uploads to
+  `hikup qvup`, forcing server certificate verification.
+- Uploads run in an "Uploads" section at the top of the menu with a live
+  glass progress bar (requires a client built with `HIKUP_PROGRESS` support);
+  finished uploads show the hash with copy/link buttons, failures show the
+  error and a retry button. Uploads keep running while the menu is closed.
+- "Clear finished transfers" under the list removes the completed and failed
+  entries (running transfers are kept).
+
+## Downloading
+
+- Each file row has a save button (disk icon): it downloads the file with
+  `hikup qdown` into GNOME's default download folder (Settings → System →
+  Privacy, falling back to `~/Downloads`), showing the same live progress bar.
+- Clicking a finished download row opens the local file with its default
+  application; the retry button on failures restarts the download.
 
 The config file is plain text, so the credentials are stored unencrypted — same as
 `settings/settings.toml` on the server.

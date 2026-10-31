@@ -3,14 +3,7 @@
    so all glow effects are done with gradients only. */
 
 /* ── panel indicator ──────────────────────────────────────────────────── */
-.hikup-panel-button StIcon {
-    color: #38bdf8;                     /* aero sky */
-}
-
-.hikup-panel-label {
-    color: #9debff;                     /* luminous glass */
-    font-weight: 600;
-}
+/* icon-only, no color overrides: match the shell's own status indicators */
 
 /* ── separators: fading glass edges ───────────────────────────────────── */
 .hikup-menu .popup-separator-menu-item {
@@ -83,6 +76,17 @@
     color: #9debff;
 }
 
+/* armed state of the trash button — click again to confirm */
+.hikup-danger-button {
+    border-color: rgba(255, 154, 168, 0.6);
+    background-gradient-start: rgba(255, 154, 168, 0.45);
+    background-gradient-end: rgba(255, 100, 120, 0.22);
+}
+
+.hikup-danger-button .hikup-action-icon {
+    color: #ff9aa8;                     /* glass rose */
+}
+
 /* ── filter box ────────────────────────────────────────────────────────── */
 .hikup-filter-item {
     padding: 2px 8px 6px 8px;
@@ -120,4 +124,25 @@
 /* ── file type icon ────────────────────────────────────────────────────── */
 .hikup-file-icon {
     icon-size: 20px;
+}
+
+/* ── uploads ──────────────────────────────────────────────────────────── */
+.hikup-upload-item {
+    spacing: 8px;
+    padding: 6px 8px;
+    border-radius: 12px;
+    /* hairline top/bottom borders make concurrent uploads readable */
+    border-top-width: 1px;
+    border-top-color: rgba(157, 235, 255, 0.15);
+    border-bottom-width: 1px;
+    border-bottom-color: rgba(157, 235, 255, 0.15);
+}
+
+.hikup-progress-bar {
+    min-width: 160px;
+    height: 10px;
+}
+
+.hikup-done-mark {
+    color: #7bf1c4;                     /* aqua glass */
 }
