@@ -7,6 +7,7 @@ import Graphene from 'gi://Graphene';
 import Cairo from 'cairo';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
@@ -175,6 +176,9 @@ class HikupButton extends PanelMenu.Button {
         this.add_style_class_name('hikup-panel-button');
         this.menu.actor?.add_style_class_name('hikup-menu');
 
+        // take the notification source down with the indicator
+        this.connect('destroy', () => this._notificationSource?.destroy());
+
         // per-server listing cache: {state: 'loading'|'done'|'error', …}
         this._cache = new Map();
         // in-flight and finished uploads, newest first
@@ -182,6 +186,7 @@ class HikupButton extends PanelMenu.Button {
         this._filterText = '';
         this._fileRows = [];    // {item, section, text}
         this._sections = [];    // {sub, server}
+        this._notificationSource = null;
 
         this.menu.connect('open-state-changed', (menu, open) => {
             if (open)
@@ -609,6 +614,7 @@ class HikupButton extends PanelMenu.Button {
             });
             launcher.setenv('HIKUP_PROGRESS', '1', true);
             proc = launcher.spawnv(argv);
+            entry.proc = proc;   // kept so the transfer can be cancelled
         } catch (e) {
             entry.state = 'error';
             entry.error = e.message;
@@ -668,6 +674,7 @@ class HikupButton extends PanelMenu.Button {
             });
             launcher.setenv('HIKUP_PROGRESS', '1', true);
             proc = launcher.spawnv(argv);
+            entry.proc = proc;   // kept so the transfer can be cancelled
         } catch (e) {
             entry.state = 'error';
             entry.error = e.message;
@@ -737,7 +744,26 @@ class HikupButton extends PanelMenu.Button {
         }
     }
 
+    _cancelTransfer(entry) {
+        entry.cancelled = true;
+        entry.proc?.force_exit();
+    }
+
     _finishUpload(entry, proc) {
+        if (entry.cancelled) {
+            // user-initiated: drop the row, remove a partial download, no notification
+            this._uploads = this._uploads.filter(upload => upload !== entry);
+            if (entry.kind === 'download' && entry.total && entry.sent < entry.total) {
+                try {
+                    Gio.File.new_for_path(entry.path).delete(null);
+                } catch (e) {
+                }
+            }
+            if (this.menu.isOpen)
+                this._rebuild();
+            return;
+        }
+
         const code = proc.get_exit_status();
         if (code === 0 && (entry.hash || entry.kind === 'download')) {
             entry.state = 'done';
@@ -753,6 +779,78 @@ class HikupButton extends PanelMenu.Button {
 
         if (this.menu.isOpen)
             this._rebuild();
+        else
+            this._notifyFinished(entry);   // user is not watching the menu
+    }
+
+    _notifyFinished(entry) {
+        const kindLabel = entry.kind === 'download' ? 'download' : 'upload';
+
+        if (entry.state !== 'done') {
+            Main.notify(`hikup — ${kindLabel} failed`,
+                `${entry.name}: ${entry.error ?? 'unknown error'}`);
+            return;
+        }
+
+        try {
+            const source = this._getNotificationSource();
+
+            const notification = new MessageTray.Notification({
+                source,
+                title: `hikup — ${kindLabel} complete`,
+                body: entry.name,
+                iconName: 'weather-overcast-symbolic',
+            });
+
+            if (entry.kind === 'download') {
+                // clicking the banner (or "Open file") opens the file,
+                // "Open folder" its containing directory in the file manager
+                const openFile = () => {
+                    try {
+                        this._openUri(GLib.filename_to_uri(entry.path, null));
+                    } catch (e) {
+                        this._copy(entry.path);
+                    }
+                };
+                notification.connect('activated', openFile);
+                notification.addAction('Open file', openFile);
+                notification.addAction('Open folder', () => {
+                    try {
+                        this._openUri(
+                            GLib.filename_to_uri(GLib.path_get_dirname(entry.path), null));
+                    } catch (e) {
+                    }
+                });
+            } else {
+                if (entry.link)
+                    notification.connect('activated', () => this._openUri(entry.link));
+                notification.addAction('Copy link', () => {
+                    if (entry.link)
+                        this._copy(entry.link);
+                    else   // no HTTP frontend on this server: copy the command
+                        this._copy(`hikup down ${entry.hash} ${entry.server.address}`);
+                });
+            }
+
+            source.addNotification(notification);
+        } catch (e) {
+            // safety net against API drift: plain notification, no buttons
+            Main.notify(`hikup — ${kindLabel} complete`, entry.name);
+        }
+    }
+
+    _getNotificationSource() {
+        if (!this._notificationSource) {
+            this._notificationSource = new MessageTray.Source({
+                title: 'hikup',
+                iconName: 'weather-overcast-symbolic',
+            });
+            this._notificationSource.connect('destroy', () => {
+                this._notificationSource = null;
+            });
+            Main.messageTray.add(this._notificationSource);
+        }
+        return this._notificationSource;
     }
 
     _uploadRow(entry) {
@@ -785,6 +883,10 @@ class HikupButton extends PanelMenu.Button {
                 style_class: 'hikup-file-meta',
             });
             header.add_child(pct);
+
+            // cancel: kill the hikup process, the server copes with that
+            header.add_child(this._actionButton('window-close-symbolic',
+                () => this._cancelTransfer(entry)));
 
             const bar = new HikupProgressBar({
                 x_expand: true,

@@ -84,6 +84,19 @@ stripped from `address` first).
   Privacy, falling back to `~/Downloads`), showing the same live progress bar.
 - Clicking a finished download row opens the local file with its default
   application; the retry button on failures restarts the download.
+- Running transfers have a close button next to the percentage: it kills the
+  `hikup` process (the server cleans up partial uploads on its own) and
+  removes a partially downloaded file.
+
+## Notifications
+
+- When a transfer finishes while the menu is closed, a system notification
+  reports the outcome (file name, or the error on failure). Transfers
+  finishing with the menu open just update the row in place.
+- Completed-transfer notifications carry actions: "Copy link" for uploads
+  (or the download command when the server has no HTTP frontend), "Open
+  file" and "Open folder" for downloads; clicking the banner does the same
+  as the first action.
 
 The config file is plain text, so the credentials are stored unencrypted — same as
 `settings/settings.toml` on the server.
