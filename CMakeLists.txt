@@ -84,6 +84,9 @@ find_package(OpenSSL REQUIRED)
 target_link_libraries(hikup OpenSSL::SSL)
 target_link_libraries(hikup-server OpenSSL::SSL)
 
+find_package(CURL REQUIRED)   # server-side URL fetch for `hikup transfer`
+target_link_libraries(hikup-server CURL::libcurl)
+
 include(GNUInstallDirs)
 
 install(TARGETS hikup hikup-server

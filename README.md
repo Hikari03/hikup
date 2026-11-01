@@ -24,6 +24,7 @@
 - `hikup up <file> <server-address>[:port]`: Upload a file.
 - `hikup down <file> <server-address>[:port] [destination]`: Download a file; `destination` is an optional directory (keeps the server-side name) or file path, defaulting to the current directory.
 - `hikup info <hash> <server-address>[:port]`: Show file metadata (name, size, upload date) without downloading it.
+- `hikup transfer <url> <server-address>[:port]`: The server itself fetches the URL (http/https, redirects followed) and stores it like an upload; prints the hash and link. Shows live progress of the server-side fetch. The stored name is what the remote suggests — the `Content-Disposition` header when present, otherwise the final URL path after redirects.
 - `hikup rm <file> <server-address>[:port]`: Remove a file.
 - `hikup ls <user> <pass> <server-address>[:port]`: List all files (requires authentication).
 - add `q` into first argument for quiet run: like qup, qdown, ...

@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <cstring>
+#include <strings.h>
 #include <fstream>
 #include <set>
 #include <utility>
 #include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <curl/curl.h>
 
 #include "HTTPFileServer.hpp"
 #include "utils.hpp"
@@ -47,6 +50,8 @@ void ConnectionHandler::_serveConnection ( ClientInfo client ) {
 			_handleListFiles(connection);
 		else if ( message == "command:INFO" )
 			_handleInfo(connection);
+		else if ( message == "command:TRANSFER" )
+			_handleTransfer(connection);
 		else if ( message == "command:SYNC" )
 			_syncAsSlave(connection);
 		else if ( message == "command:BATCH_UPLOAD")
@@ -353,6 +358,269 @@ void ConnectionHandler::_handleInfo ( ConnectionServer& connection ) const {
 
 	connection.sendInternal("OK");
 	connection.sendData(FileInfo(fileName, true).encode());
+}
+
+// streaming write callback for the transfer feature: file + hash on the fly
+namespace {
+	struct TransferCtx {
+		std::ofstream* file;
+		EVP_MD_CTX* md;
+		std::string suggestedName;   // from Content-Disposition, if any
+		bool ok = true;
+	};
+
+	int _hexNibble ( const char c ) {
+		if ( c >= '0' && c <= '9' ) return c - '0';
+		if ( c >= 'a' && c <= 'f' ) return c - 'a' + 10;
+		if ( c >= 'A' && c <= 'F' ) return c - 'A' + 10;
+		return -1;
+	}
+
+	std::string _percentDecode ( std::string in ) {
+		std::string out;
+		out.reserve(in.size());
+
+		for ( size_t i = 0; i < in.size(); ++i ) {
+			if ( in[i] == '%' && i + 2 < in.size() ) {
+				const int hi = _hexNibble(in[i + 1]);
+				const int lo = _hexNibble(in[i + 2]);
+				if ( hi >= 0 && lo >= 0 ) {
+					out += static_cast<char>((hi << 4) | lo);
+					i += 2;
+					continue;
+				}
+			}
+			out += in[i];
+		}
+
+		return out;
+	}
+
+	// last path segment of a URL (query and fragment stripped), "" when absent
+	std::string _nameFromUrl ( const std::string& url ) {
+		std::string pathPart = url;
+		if ( const auto scheme = pathPart.find("://"); scheme != std::string::npos )
+			pathPart = pathPart.substr(scheme + 3);
+		if ( const auto slash = pathPart.find('/'); slash != std::string::npos ) {
+			pathPart = pathPart.substr(slash + 1);
+			if ( const auto q = pathPart.find_first_of("?#"); q != std::string::npos )
+				pathPart.resize(q);
+			if ( !pathPart.empty() ) {
+				const auto name = std::filesystem::path(pathPart).filename().string();
+				if ( !name.empty() && name != "." && name != ".." )
+					return name;
+			}
+		}
+		return {};
+	}
+
+	size_t _transferWrite ( char* ptr, const size_t size, const size_t nmemb, void* userdata ) {
+		auto* ctx = static_cast<TransferCtx*>(userdata);
+		const auto total = size * nmemb;
+
+		ctx->file->write(ptr, static_cast<std::streamsize>(total));
+		if ( !ctx->file->good() ) {
+			ctx->ok = false;
+			return 0;   // returning less than requested aborts the transfer
+		}
+
+		EVP_DigestUpdate(ctx->md, ptr, total);
+		return total;
+	}
+
+	// live progress for the client while the server fetches: throttled
+	// "PROGRESS <now> <total>" lines (total is 0 when the server did not
+	// send a Content-Length)
+	int _transferProgress ( void* userdata, const curl_off_t dlTotal, const curl_off_t dlNow,
+	                        curl_off_t, curl_off_t ) {
+		thread_local auto lastSend = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+
+		if ( std::chrono::steady_clock::now() - lastSend < std::chrono::milliseconds(50) )
+			return 0;
+		lastSend = std::chrono::steady_clock::now();
+
+		auto* connection = static_cast<ConnectionServer*>(userdata);
+		try {
+			connection->sendInternal("PROGRESS " + std::to_string(dlNow) + ' ' + std::to_string(dlTotal));
+		} catch ( ... ) {
+			return 1;   // the client went away — abort the fetch
+		}
+
+		return 0;
+	}
+
+	// remember the name the remote suggests for the content:
+	// Content-Disposition: attachment; filename="real-name.pdf"
+	// (RFC 5987 filename*=UTF-8''percent%20encoded takes precedence)
+	size_t _transferHeader ( char* ptr, const size_t size, const size_t nmemb, void* userdata ) {
+		auto* ctx = static_cast<TransferCtx*>(userdata);
+		const auto total = size * nmemb;
+
+		std::string line(ptr, total);
+		while ( !line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ') )
+			line.pop_back();
+
+		if ( strncasecmp(line.c_str(), "content-disposition:", 20) != 0 )
+			return total;
+
+		std::string value;
+
+		const auto star = line.find("filename*=");
+		if ( star != std::string::npos ) {
+			value = line.substr(star + 10);
+			// charset'language'value — skip the first two quoted segments
+			const auto q1 = value.find('\'');
+			const auto q2 = q1 == std::string::npos ? std::string::npos : value.find('\'', q1 + 1);
+			if ( q2 != std::string::npos )
+				value = value.substr(q2 + 1);
+			value = _percentDecode(value);
+		} else {
+			const auto plain = line.find("filename=");
+			if ( plain == std::string::npos )
+				return total;
+			value = line.substr(plain + 9);
+			if ( const auto sc = value.find(';'); sc != std::string::npos )
+				value.resize(sc);
+			if ( !value.empty() && value.front() == '"' ) {
+				value.erase(0, 1);
+				if ( const auto e = value.find('"'); e != std::string::npos )
+					value.resize(e);
+			}
+			const auto first = value.find_first_not_of(" 	");
+			const auto last = value.find_last_not_of(" 	");
+			if ( first == std::string::npos )
+				return total;
+			value = value.substr(first, last - first + 1);
+		}
+
+		// never let a header inject path components
+		const auto name = std::filesystem::path(value).filename().string();
+		if ( !name.empty() && name != "." && name != ".." )
+			ctx->suggestedName = name;
+
+		return total;
+	}
+}
+
+void ConnectionHandler::_handleTransfer ( ConnectionServer& connection ) {
+	const auto url = connection.receiveInternal().substr(strlen("url:"));
+
+	if ( !url.starts_with("http://") && !url.starts_with("https://") ) {
+		Utils::log("_handleTransfer: unsupported URL: " + url);
+		connection.sendInternal("unsupported URL, only http and https are allowed");
+		return;
+	}
+
+	// a fallback name from the original URL path, for logging only — the
+	// final name is decided after the fetch (headers, effective URL)
+	const auto urlName = _nameFromUrl(url);
+
+	// a random suffix so concurrent transfers cannot collide
+	unsigned char id[8];
+	if ( RAND_bytes(id, sizeof id) != 1 ) {
+		connection.sendInternal("could not generate a temporary name");
+		return;
+	}
+	const auto tempPath = std::filesystem::current_path() / "storage"
+	                   / ( "transfer-" + bytesToHex(id, sizeof id) + ".part" );
+
+	std::ofstream file(tempPath, std::ios::binary);
+	if ( !file ) {
+		connection.sendInternal("could not create a temporary file on the server");
+		return;
+	}
+
+	Utils::log("_handleTransfer: fetching " + url);
+
+	const auto mdctx = EVP_MD_CTX_new();
+	EVP_DigestInit_ex(mdctx, EVP_blake2s256(), nullptr);
+
+	TransferCtx ctx{&file, mdctx, {}, true};
+
+	CURL* curl = curl_easy_init();
+	if ( !curl ) {
+		file.close();
+		std::filesystem::remove(tempPath);
+		EVP_MD_CTX_free(mdctx);
+		connection.sendInternal("could not initialise the fetch (curl)");
+		return;
+	}
+
+	curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _transferWrite);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "hikup-server");
+	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);   // enable the XFERINFO callback
+	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, _transferProgress);
+	curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &connection);
+	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, _transferHeader);
+	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &ctx);
+
+	// job accepted — the client now shows live progress until the result
+	connection.sendInternal("OK");
+
+	const auto result = curl_easy_perform(curl);
+
+	long response = 0;
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response);
+	char* effective = nullptr;
+	curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective);
+	const std::string effectiveUrl = effective != nullptr ? effective : url;
+	curl_easy_cleanup(curl);
+
+	file.close();
+
+	auto hash = std::make_unique<unsigned char[]>(EVP_MAX_MD_SIZE);
+	unsigned int hashSize = EVP_MAX_MD_SIZE;
+	EVP_DigestFinal_ex(mdctx, hash.get(), &hashSize);
+	EVP_MD_CTX_free(mdctx);
+
+	if ( result != CURLE_OK || !ctx.ok || response >= 400 ) {
+		std::filesystem::remove(tempPath);
+
+		std::string reason = "fetch failed: ";
+		if ( response >= 400 )
+			reason += "HTTP " + std::to_string(response);
+		else
+			reason += ctx.ok ? curl_easy_strerror(result) : "write error on the server";
+
+		Utils::elog("_handleTransfer: " + reason);
+		connection.sendInternal("failed:" + reason);   // fetch failures come after the OK
+		return;
+	}
+
+	const auto hashString = bytesToHex(hash.get(), hashSize);
+
+	// naming priority: the name the remote suggests (Content-Disposition),
+	// the final URL path after redirects, the original URL path
+	std::string finalName = ctx.suggestedName;
+	if ( finalName.empty() )
+		finalName = _nameFromUrl(effectiveUrl);
+	if ( finalName.empty() )
+		finalName = urlName;
+	if ( finalName.empty() || finalName == "." || finalName == ".." )
+		finalName = "index.html";
+
+	// same name scheme as uploads: all dots become '<'
+	std::ranges::replace(finalName, '.', '<');
+	const auto finalPath = std::filesystem::current_path() / "storage" / ( finalName + '.' + hashString );
+
+	if ( std::filesystem::exists(finalPath) )
+		std::filesystem::remove(tempPath);   // content already known — deduplicate
+	else
+		std::filesystem::rename(tempPath, finalPath);
+
+	_readyFiles.add(hashString);
+
+	// respond like a finished upload (the OK was already sent when the job
+	// was accepted — only the result messages follow)
+	const auto httpLink = HTTPFileServer::createSymlinkFor(finalPath);
+	connection.sendInternal(hashString);
+	connection.sendInternal(std::to_string(_settings.wantHttp));
+	if ( _settings.wantHttp && connection.receiveInternal() == "getHttpLink" )
+		connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + httpLink);
 }
 
 void ConnectionHandler::_handleBatchReceiveFile ( ConnectionServer& connection ) {

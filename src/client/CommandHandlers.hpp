@@ -12,4 +12,5 @@ namespace CommandHandlers {
 	int downloadFileE2E ( Connection& connection, const std::string& key, bool quiet = false );
 	int listFiles ( Connection& connection, const std::string& user, const std::string& pass, bool quiet = false );
 	int infoFile ( Connection& connection, bool quiet = false );
+	int transferUrl ( Connection& connection, bool quiet = false );
 }

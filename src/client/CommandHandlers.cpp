@@ -301,6 +301,72 @@ int CommandHandlers::infoFile ( Connection& connection, const bool quiet ) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════
+int CommandHandlers::transferUrl ( Connection& connection, const bool quiet ) {
+    using clock = std::chrono::steady_clock;
+
+    // live progress while the server fetches: "PROGRESS <now> <total>" lines
+    // arrive until the final result message
+    const bool showProgress = !quiet && ui::g_tty;
+    const size_t termW = ui::terminalWidth();
+    const auto startT = clock::now();
+    auto lastDraw = startT - std::chrono::seconds(1);
+
+    std::string line;
+    while ( ( line = connection.receiveInternal() ).starts_with("PROGRESS ") ) {
+        if ( !showProgress || clock::now() - lastDraw < std::chrono::milliseconds(100) )
+            continue;   // quiet mode still consumes the lines (protocol sync)
+
+        const auto parts = line.substr(strlen("PROGRESS "));
+        const auto split = parts.find(' ');
+        const unsigned long long now = split == std::string::npos ? 0 : std::stoull(parts.substr(0, split));
+        const unsigned long long total = split == std::string::npos ? 0 : std::stoull(parts.substr(split + 1));
+
+        if ( total > 0 ) {
+            const std::chrono::duration<double> el = clock::now() - startT;
+            ui::drawProgress("transferring", now, total,
+                              el.count() > 0 ? double(now) / el.count() : 0.0, termW);
+        } else {
+            // unknown size (no Content-Length): just show what arrived
+            std::cout << "\r\033[K" << ui::tag("*", ui::RUST) << ' '
+                      << ui::paint("transferring", ui::BOLD) << "  "
+                      << ui::paint(humanReadableSize(now) + " received", ui::SAND) << std::flush;
+        }
+        lastDraw = clock::now();
+    }
+
+    if ( showProgress )
+        ui::clearLine();
+
+    if ( line.starts_with("failed:") ) {
+        ui::fail("transfer failed: " + line.substr(strlen("failed:")));
+        return 1;
+    }
+
+    // the first non-PROGRESS message is the hash
+    const auto hash = line;
+    const bool httpExists = std::stoi(connection.receiveInternal()) != 0;
+
+    std::string httpLink;
+    if ( httpExists ) {
+        connection.sendInternal("getHttpLink");
+        httpLink = connection.receiveInternal();
+    }
+
+    if ( quiet ) {
+        std::cout << "hash: " << hash << '\n';
+        if ( httpExists ) std::cout << "http: " << httpLink << "\n\n";
+        return 0;
+    }
+
+    ui::printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("transferred", ui::BOLD), {
+                      { "hash", hash,                               ui::RUST },
+                      { "link", httpExists ? httpLink : "not available",
+                              httpExists ? ui::AMBER : ui::ASH },
+                  });
+    return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
 int CommandHandlers::listFiles ( Connection& connection, const std::string& user, const std::string& pass, const bool quiet ) {
     connection.sendInternal("user:" + user);
     connection.sendInternal("pass:" + pass);

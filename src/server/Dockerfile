@@ -8,7 +8,7 @@ WORKDIR /app
 # Install dependencies - sodium cmake g++ make
 RUN echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
     apk update && \
-    apk add --no-cache openssl-dev openssl-libs-static g++ cmake make pkgconf \
+    apk add --no-cache openssl-dev openssl-libs-static curl-dev curl-static g++ cmake make pkgconf \
     && cmake -B build -S . -DHIKUP_STATIC=ON \
     && cmake --build build --target hikup-server -j$(nproc) \
     && mv build/hikup-server /app/hikup-server \

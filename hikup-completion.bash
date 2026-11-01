@@ -28,6 +28,7 @@ _hikup() {
         down qdown vdown qvdown vqdown
         edown qedown vedown qvedown vqedown
         info qinfo vinfo qvinfo vqinfo
+        transfer qtransfer vtransfer qvtransfer vqtransfer
         rm qrm vrm qvrm vqrm
         ls qls vls qvls vqls
     )
@@ -62,7 +63,7 @@ _hikup() {
                 return 0
             fi
             ;;
-        *down*|*rm*|*info*)
+        *down*|*rm*|*info*|*transfer*)
             if [[ $cword -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "-" -- "$cur") )
                 return 0
