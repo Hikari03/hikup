@@ -87,6 +87,9 @@ stripped from `address` first).
 - Running transfers have a close button next to the percentage: it kills the
   `hikup` process (the server cleans up partial uploads on its own) and
   removes a partially downloaded file.
+- "Transfer URL…" opens an inline entry in the server section: type or paste
+  a URL and press Enter — the server fetches it (`hikup qtransfer`) and the
+  row shows the live progress of the server-side download. Escape cancels.
 
 ## Notifications
 

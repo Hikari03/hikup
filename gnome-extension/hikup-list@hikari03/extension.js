@@ -167,12 +167,35 @@ class HikupButton extends PanelMenu.Button {
 
         this._extension = extension;
 
-        const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
+        // St.BoxLayout ignores per-child layout properties on GNOME 51 (the
+        // upload rows hit the same thing), and a stacked box packs the icon
+        // toward the top once the button stretches its child — a BinLayout
+        // instead keeps the icon dead-center and floats the bar below it
+        const box = new St.Widget({
+            layout_manager: new Clutter.BinLayout(),
+            style_class: 'panel-status-menu-box',
+        });
         box.add_child(new St.Icon({
             icon_name: 'weather-overcast-symbolic',
             style_class: 'system-status-icon',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
         }));
         this.add_child(box);
+        this._panelBox = box;
+
+        // thin aggregate progress bar under the icon — added to the box only
+        // while transfers run, so it takes no space when idle. The box is only
+        // as tall as the icon, so END alone would pin the bar inside it; the
+        // translation drops it to just below the icon's bottom edge
+        this._panelBar = new HikupProgressBar({
+            width: 20,
+            height: 3,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.END,
+            translation_y: 8,
+            style_class: 'hikup-panel-progress-bar',
+        });
         this.add_style_class_name('hikup-panel-button');
         this.menu.actor?.add_style_class_name('hikup-menu');
 
@@ -187,6 +210,8 @@ class HikupButton extends PanelMenu.Button {
         this._fileRows = [];    // {item, section, text}
         this._sections = [];    // {sub, server}
         this._notificationSource = null;
+        this._urlEntryKey = null;   // serverKey of the section with an open URL entry
+        this._rebuildPending = false;
 
         this.menu.connect('open-state-changed', (menu, open) => {
             if (open)
@@ -198,7 +223,32 @@ class HikupButton extends PanelMenu.Button {
         this._rebuild();
     }
 
+    // ── rebuild ─────────────────────────────────────────────────────────────
+    // never mutate the menu synchronously from a click/key handler —
+    // destroying the actor under the pointer makes the menu grab give up and
+    // the menu closes. Rebuild on the next idle instead, coalesced.
     _rebuild() {
+        if ( this._rebuildPending )
+            return;
+        this._rebuildPending = true;
+
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._rebuildPending = false;
+            try {
+                this._rebuildNow();
+            } catch (e) {
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _rebuildNow() {
+        // remember which server submenus were expanded — the rebuild replaces
+        // them with fresh (collapsed) ones and must restore their state
+        const openKeys = new Set(this._sections
+            .filter(section => section.sub.menu.isOpen)
+            .map(section => serverKey(section.server)));
+
         this.menu.removeAll();
         this._fileRows = [];
         this._sections = [];
@@ -259,6 +309,8 @@ class HikupButton extends PanelMenu.Button {
         for (const server of servers) {
             const sub = new PopupMenu.PopupSubMenuMenuItem(serverLabel(server));
             sub.add_style_class_name('hikup-server-item');
+            if ( openKeys.has(serverKey(server)) )
+                sub.setSubmenuShown(true);
             this.menu.addMenuItem(sub);
 
             const section = {sub, server};
@@ -294,6 +346,21 @@ class HikupButton extends PanelMenu.Button {
         this.menu.addMenuItem(settings);
 
         this._applyFilter();
+
+        // submenus re-expand reliably only once the menu has been laid out —
+        // setSubmenuShown above runs during construction, so do it once more
+        // on the next idle for anything that did not stick
+        if ( openKeys.size > 0 ) {
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                for ( const section of this._sections )
+                    if ( openKeys.has(serverKey(section.server)) && !section.sub.menu.isOpen )
+                        try {
+                            section.sub.setSubmenuShown(true);
+                        } catch (e) {
+                        }
+                return GLib.SOURCE_REMOVE;
+            });
+        }
     }
 
     // ── fetch ──────────────────────────────────────────────────────────────
@@ -387,13 +454,105 @@ class HikupButton extends PanelMenu.Button {
         return true;
     }
 
-    // "Upload file…" is the first entry of every server section regardless of
-    // which state it renders in
+    // "Upload file…" / "Transfer URL…" are the first entries of every server
+    // section regardless of which state it renders in
     _sectionPreamble(sub, server) {
-        const uploadItem = new PopupMenu.PopupMenuItem('Upload file…');
-        uploadItem.connect('activate', () => this._pickFile(server));
-        sub.menu.addMenuItem(uploadItem);
+        const key = serverKey(server);
+
+        // URL entry mode: type/paste a URL, Enter fetches it server-side
+        if ( this._urlEntryKey === key ) {
+            const item = new PopupMenu.PopupBaseMenuItem({reactive: false, activate: false, hover: false});
+            item.add_style_class_name('hikup-filter-item');
+
+            const entry = new St.Entry({
+                hint_text: 'URL to fetch (http/https)…',
+                can_focus: true,
+                track_hover: true,
+                x_expand: true,
+                style_class: 'hikup-filter-entry',
+            });
+            const text = entry.clutter_text;
+            text.connect('activate', () => {
+                const url = text.text.trim();
+                this._urlEntryKey = null;
+                if ( url )
+                    this._startTransfer(server, url);
+                if ( this.menu.isOpen )
+                    this._rebuild();
+            });
+            text.connect('key-press-event', (t, event) => {
+                if ( event.get_key_symbol() === Clutter.KEY_Escape ) {
+                    this._urlEntryKey = null;
+                    GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                        this._rerenderSection(sub, server);
+                        return GLib.SOURCE_REMOVE;
+                    });
+                }
+                return Clutter.EVENT_PROPAGATE;
+            });
+
+            item.add_child(entry);
+            sub.menu.addMenuItem(item);
+            sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                try {
+                    text.grab_key_focus();
+                } catch (e) {
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+            return;
+        }
+
+        const item = new PopupMenu.PopupBaseMenuItem({reactive: false, activate: false, hover: false});
+        item.add_style_class_name('hikup-preamble-item');
+
+        const upload = new St.Button({
+            label: 'Upload file…',
+            style_class: 'button hikup-retry-button',
+            can_focus: true,
+        });
+        upload.connect('clicked', () => this._pickFile(server));
+
+        const transfer = new St.Button({
+            label: 'Transfer URL…',
+            style_class: 'button hikup-retry-button',
+            can_focus: true,
+        });
+        transfer.connect('clicked', () => {
+            this._urlEntryKey = key;
+            // re-render only this section (deferred, past the click event) —
+            // the submenu itself is never destroyed, so it stays open
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                this._rerenderSection(sub, server);
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+
+        item.add_child(upload);
+        item.add_child(transfer);
+        sub.menu.addMenuItem(item);
         sub.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+    }
+
+    // re-render a single server section in place (keeps the submenu open,
+    // unlike a full rebuild which replaces it with a collapsed one)
+    _rerenderSection(sub, server) {
+        const cached = this._cache.get(serverKey(server));
+
+        if ( cached?.state === 'done' ) {
+            const section = this._sections.find(s => s.sub === sub);
+            if ( section )
+                this._renderFiles(section, cached.files);
+        } else if ( cached?.state === 'loading' )
+            this._showSpinner(sub, server);
+        else if ( cached?.state === 'error' )
+            this._showError(sub, server, cached.error);
+        else
+            this._fetch(server, sub);
+
+        this._applyFilter();
     }
 
     _showSpinner(sub, server) {
@@ -628,6 +787,85 @@ class HikupButton extends PanelMenu.Button {
 
         // collect stderr for error reporting
         this._readLines(proc.get_stderr_pipe(), line => entry.stderr.push(line), () => {});
+
+        // the menu stays open (button click) — show the running row now
+        this._updatePanelBar();
+        if (this.menu.isOpen)
+            this._rebuild();
+    }
+
+    _startTransfer(server, url) {
+        const hikup = GLib.find_program_in_path('hikup');
+        if (!hikup) {
+            Main.notify('hikup', 'hikup not found in the PATH of gnome-shell');
+            return;
+        }
+
+        // display name from the URL path, mirroring the server's logic
+        let name = 'index.html';
+        {
+            let pathPart = url;
+            const scheme = pathPart.indexOf('://');
+            if ( scheme >= 0 )
+                pathPart = pathPart.substring(scheme + 3);
+            const slash = pathPart.indexOf('/');
+            if ( slash >= 0 ) {
+                pathPart = pathPart.substring(slash + 1);
+                const q = pathPart.search(/[?#]/);
+                if ( q >= 0 )
+                    pathPart = pathPart.substring(0, q);
+                if ( pathPart )
+                    name = pathPart.split('/').pop();
+            }
+        }
+
+        const entry = {
+            kind: 'transfer',
+            name,
+            url,
+            server,
+            state: 'running',
+            sent: 0,
+            total: 0,
+            hash: null,
+            link: null,
+            error: null,
+            stderr: [],
+            _bar: null,
+            _pct: null,
+        };
+        this._uploads.unshift(entry);
+
+        // qtransfer streams "PROGRESS <now> <total>" lines while the server
+        // fetches, then "hash:" / "http:" like an upload
+        const argv = [
+            hikup,
+            server.verify ? 'qvtransfer' : 'qtransfer',
+            url,
+            String(server.address ?? ''),
+        ];
+
+        let proc;
+        try {
+            const launcher = new Gio.SubprocessLauncher({
+                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
+            });
+            proc = launcher.spawnv(argv);
+            entry.proc = proc;   // kept so the transfer can be cancelled
+        } catch (e) {
+            entry.state = 'error';
+            entry.error = e.message;
+            return;
+        }
+
+        this._readLines(proc.get_stdout_pipe(), line => this._onUploadLine(entry, line), () => {
+            proc.wait_async(null, p => this._finishUpload(entry, p));
+        });
+        this._readLines(proc.get_stderr_pipe(), line => entry.stderr.push(line), () => {});
+
+        this._updatePanelBar();
+        if (this.menu.isOpen)
+            this._rebuild();
     }
 
     _startDownload(file, server) {
@@ -691,6 +929,7 @@ class HikupButton extends PanelMenu.Button {
 
         // the menu stays open when a download starts (the button does not
         // close it) — rebuild so the running row and its bar appear now
+        this._updatePanelBar();
         if (this.menu.isOpen)
             this._rebuild();
     }
@@ -737,6 +976,7 @@ class HikupButton extends PanelMenu.Button {
                 entry._pct?.set_text(`${Math.round(fraction * 100)}%`);
             } catch (e) {
             }
+            this._updatePanelBar();
         } else if (line.startsWith('hash: ')) {
             entry.hash = line.slice('hash: '.length).trim();
         } else if (line.startsWith('http: ')) {
@@ -761,6 +1001,7 @@ class HikupButton extends PanelMenu.Button {
             }
             if (this.menu.isOpen)
                 this._rebuild();
+            this._updatePanelBar();
             return;
         }
 
@@ -781,6 +1022,7 @@ class HikupButton extends PanelMenu.Button {
             this._rebuild();
         else
             this._notifyFinished(entry);   // user is not watching the menu
+        this._updatePanelBar();
     }
 
     _notifyFinished(entry) {
@@ -961,6 +1203,8 @@ class HikupButton extends PanelMenu.Button {
                 this._startDownload(
                     {name: entry.name, hash: entry.hash, size: entry.total},
                     entry.server);
+            else if (entry.kind === 'transfer')
+                this._startTransfer(entry.server, entry.url);
             else
                 this._startUpload(entry.server, GLib.filename_to_uri(entry.path, null));
             if (this.menu.isOpen)
@@ -1087,6 +1331,36 @@ class HikupButton extends PanelMenu.Button {
             const anyVisible = rows.some(row => row.item.visible);
             const nameMatches = serverLabel(section.server).toLowerCase().includes(query);
             section.sub.visible = anyVisible || nameMatches;
+        }
+    }
+
+    // ── panel progress bar ────────────────────────────────────────────────
+    // aggregate fraction of all running transfers, shown under the icon;
+    // the bar actor is added/removed with running transfers (it overlays
+    // the button, so the icon never moves)
+    _updatePanelBar() {
+        try {
+            const running = this._uploads.filter(upload => upload.state === 'running');
+
+            if ( running.length === 0 ) {
+                if ( this._panelBar.get_parent() !== null )
+                    this._panelBox.remove_child(this._panelBar);
+                return;
+            }
+
+            let sent = 0;
+            let total = 0;
+            for ( const upload of running )
+                if ( upload.total > 0 ) {
+                    sent += upload.sent;
+                    total += upload.total;
+                }
+
+            if ( this._panelBar.get_parent() === null )
+                this._panelBox.add_child(this._panelBar);
+            this._panelBar.setFraction(total > 0 ? Math.min(1, sent / total) : 0);
+        } catch (e) {
+            // the button was destroyed (extension disabled)
         }
     }
 

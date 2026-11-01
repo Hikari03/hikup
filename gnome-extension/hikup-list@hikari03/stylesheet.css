@@ -3,7 +3,8 @@
    so all glow effects are done with gradients only. */
 
 /* ── panel indicator ──────────────────────────────────────────────────── */
-/* icon-only, no color overrides: match the shell's own status indicators */
+/* icon-only, no color overrides: match the shell's own status indicators.
+   The aggregate progress bar under the icon is sized in code (20x3). */
 
 /* ── separators: fading glass edges ───────────────────────────────────── */
 .hikup-menu .popup-separator-menu-item {
@@ -90,6 +91,11 @@
 /* ── filter box ────────────────────────────────────────────────────────── */
 .hikup-filter-item {
     padding: 2px 8px 6px 8px;
+}
+
+.hikup-preamble-item {
+    spacing: 8px;
+    padding: 2px 8px;
 }
 
 .hikup-filter-entry {
