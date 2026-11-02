@@ -36,19 +36,19 @@ inline std::tuple<std::ifstream, uintmax_t, std::string> resolveFile ( const std
 
 inline std::string colorize ( const std::string& text, Color color ) {
 	switch ( color ) {
-		case Color::RED: return "\033[38;5;196m" + text + "\033[0m";
+		case Color::RED: return "\033[38;2;255;154;168m" + text + "\033[0m";
 
-		case Color::GREEN: return "\033[38;5;47m" + text + "\033[0m";
+		case Color::GREEN: return "\033[38;2;123;241;196m" + text + "\033[0m";
 
-		case Color::BLUE: return "\033[38;5;75m" + text + "\033[0m";
+		case Color::BLUE: return "\033[38;2;56;189;248m" + text + "\033[0m";
 
-		case Color::PURPLE: return "\033[38;5;141m" + text + "\033[0m";
+		case Color::PURPLE: return "\033[38;2;196;181;253m" + text + "\033[0m";
 
-		case Color::CYAN: return "\033[38;5;45m" + text + "\033[0m";
+		case Color::CYAN: return "\033[38;2;157;235;255m" + text + "\033[0m";
 
-		case Color::LL_BLUE: return "\033[38;5;153m" + text + "\033[0m";
+		case Color::LL_BLUE: return "\033[38;2;233;246;255m" + text + "\033[0m";
 
-		case Color::YELLOW: return "\033[38;5;226m" + text + "\033[0m";
+		case Color::YELLOW: return "\033[38;2;255;233;168m" + text + "\033[0m";
 
 		default: return text;
 	}

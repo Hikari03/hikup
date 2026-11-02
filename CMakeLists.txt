@@ -45,6 +45,8 @@ add_executable(hikup src/client/main.cpp
         src/client/BatchHandlers.cpp
         src/client/CommandHandlers.cpp
         src/client/CommandHandlers.hpp
+        src/client/E2E.cpp
+        src/client/E2E.hpp
         src/client/CommandType.hpp
         src/client/Style.hpp)
 
@@ -81,3 +83,52 @@ add_executable(hikup-server src/server/main.cpp
 find_package(OpenSSL REQUIRED)
 target_link_libraries(hikup OpenSSL::SSL)
 target_link_libraries(hikup-server OpenSSL::SSL)
+
+find_package(CURL REQUIRED)   # server-side URL fetch for `hikup transfer`
+target_link_libraries(hikup-server CURL::libcurl)
+
+# libcurl.a references its private dependencies, which the CURL::libcurl
+# target does not carry onto the link line — link them explicitly; in a
+# HIKUP_STATIC build CMAKE_FIND_LIBRARY_SUFFIXES is ".a", so these resolve
+# to the static archives
+find_library(HIKUP_NGHTTP2_LIB nghttp2 REQUIRED)
+find_library(HIKUP_CARES_LIB cares REQUIRED)
+find_library(HIKUP_PSL_LIB psl REQUIRED)
+find_library(HIKUP_Z_LIB z REQUIRED)
+find_library(HIKUP_ZSTD_LIB zstd REQUIRED)
+find_library(HIKUP_BROTLIDEC_LIB brotlidec REQUIRED)
+find_library(HIKUP_BROTLICOMMON_LIB brotlicommon REQUIRED)
+find_library(HIKUP_IDN2_LIB idn2 REQUIRED)
+find_library(HIKUP_UNISTRING_LIB unistring REQUIRED)
+target_link_libraries(hikup-server
+    ${HIKUP_NGHTTP2_LIB}
+    ${HIKUP_CARES_LIB}
+    ${HIKUP_PSL_LIB}
+    ${HIKUP_Z_LIB}
+    ${HIKUP_ZSTD_LIB}
+    ${HIKUP_BROTLIDEC_LIB}
+    ${HIKUP_BROTLICOMMON_LIB}
+    ${HIKUP_IDN2_LIB}
+    ${HIKUP_UNISTRING_LIB})
+
+include(GNUInstallDirs)
+
+install(TARGETS hikup hikup-server
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+install(FILES hikup-completion.bash
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
+        RENAME hikup)
+
+install(CODE "
+    execute_process(COMMAND id -un OUTPUT_VARIABLE CURRENT_USER OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND id -gn OUTPUT_VARIABLE CURRENT_GROUP OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(DEST_DIR \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/hikup\")
+    set(DEST_FILE \"\${DEST_DIR}/servers\")
+    file(MAKE_DIRECTORY \"\${DEST_DIR}\")
+    if(NOT EXISTS \"\${DEST_FILE}\")
+        file(TOUCH \"\${DEST_FILE}\")
+    endif()
+    execute_process(COMMAND chown \"\${CURRENT_USER}:\${CURRENT_GROUP}\" \"\${DEST_DIR}\" \"\${DEST_FILE}\"
+                    ERROR_QUIET OUTPUT_QUIET)
+")

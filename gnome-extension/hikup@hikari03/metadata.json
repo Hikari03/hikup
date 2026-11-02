@@ -1,0 +1,7 @@
+{
+    "uuid": "hikup@hikari03",
+    "name": "Hikup Files",
+    "description": "Manage files stored on your hikup servers, straight from the panel. Clicking a file opens it in browser, if supported.",
+    "shell-version": ["46", "47", "48", "49", "50", "51"],
+    "version": 1
+}

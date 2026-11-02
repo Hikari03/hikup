@@ -3,6 +3,11 @@ name: Docker Image CI
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - "src/server/**"
+      - "src/shared/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/docker-image-stable.yml"
 
 jobs:
 

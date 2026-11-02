@@ -16,6 +16,10 @@ namespace Command {
 				return "REMOVE";
 			case Type::LIST:
 				return "LIST";
+			case Type::INFO:
+				return "INFO";
+			case Type::TRANSFER:
+				return "TRANSFER";
 			case Type::BATCH:
 				return "BATCH";
 			case Type::QUIET:
@@ -24,6 +28,8 @@ namespace Command {
 				return "INVALID";
 			case Type::SSL_VERIFY_CERT:
 				return "SSL_VERIFY_CERT";
+			case Type::E2E:
+				return "E2E";
 			default: // cannot happen
 				std::unreachable();
 		}
@@ -41,6 +47,12 @@ namespace Command {
 
 		if ( commands.contains(Type::LIST) )
 			return Type::LIST;
+
+		if ( commands.contains(Type::INFO) )
+			return Type::INFO;
+
+		if ( commands.contains(Type::TRANSFER) )
+			return Type::TRANSFER;
 
 		return Type::INVALID;
 	}
@@ -74,6 +86,14 @@ namespace Command {
 			command.erase(pos, 2);
 			res.emplace(Type::REMOVE);
 		}
+		else if ( pos = command.find("info"); pos != std::string::npos ) {
+			command.erase(pos, 4);
+			res.emplace(Type::INFO);
+		}
+		else if ( pos = command.find("transfer"); pos != std::string::npos ) {
+			command.erase(pos, 8);
+			res.emplace(Type::TRANSFER);
+		}
 
 		if ( pos = command.find('q'); pos != std::string::npos ) {
 			command.erase(pos, 1);
@@ -83,6 +103,11 @@ namespace Command {
 		if ( pos = command.find('v'); pos != std::string::npos ) {
 			command.erase(pos, 1);
 			res.emplace(Type::SSL_VERIFY_CERT);
+		}
+
+		if ( pos = command.find('e'); pos != std::string::npos ) {
+			command.erase(pos, 1);
+			res.emplace(Type::E2E);
 		}
 
 		if ( res.empty() || !command.empty() )
