@@ -5,6 +5,7 @@ on:
     branches: [ "dev", "main" ]
     paths:
       - "gnome-extension/**"
+      - ".github/workflows/gnome-extension-zip.yml"
   workflow_dispatch:
 
 jobs:
