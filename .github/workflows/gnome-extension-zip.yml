@@ -23,10 +23,13 @@ jobs:
           zip -r "../../hikup@hikari03.zip" .
 
       # pinned Shexli via the action — the latest PyPI release can segfault
+      # EGO-M-004 ignored: the pinned Shexli predates GNOME 50/51 and flags
+      # those (real, current) shell-versions as implausible
       - name: Verify extension zip
         uses: stuarthayhurst/shexli-github-action@v1
         with:
           path: "hikup@hikari03.zip"
+          ignored-checks: "EGO-M-004"
 
       - name: Upload zip artifact
         uses: actions/upload-artifact@v4
