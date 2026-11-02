@@ -16,14 +16,14 @@ Lists the files stored on your hikup servers, straight from the GNOME top panel.
 ## Install
 
 ```bash
-cp -r gnome-extension/hikup-list@hikari03 ~/.local/share/gnome-shell/extensions/
+cp -r gnome-extension/hikup@hikari03 ~/.local/share/gnome-shell/extensions/
 ```
 
 Then log out and back in (on X11 you can restart the shell with `Alt+F2`, `r`, `Enter`),
 and enable it:
 
 ```bash
-gnome-extensions enable hikup-list@hikari03
+gnome-extensions enable hikup@hikari03
 ```
 
 ## Configuration
@@ -107,6 +107,6 @@ The config file is plain text, so the credentials are stored unencrypted — sam
 ## Debugging
 
 ```bash
-gnome-extensions info hikup-list@hikari03
+gnome-extensions info hikup@hikari03
 journalctl -f /usr/bin/gnome-shell | grep -i hikup
 ```
