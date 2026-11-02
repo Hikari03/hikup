@@ -22,16 +22,11 @@ jobs:
           cd gnome-extension/hikup@hikari03
           zip -r "../../hikup@hikari03.zip" .
 
-      - name: Set up venv and install shexli
-        run: |
-          python3 -m venv venv
-          . venv/bin/activate
-          pip install -U shexli
-
+      # pinned Shexli via the action — the latest PyPI release can segfault
       - name: Verify extension zip
-        run: |
-          . venv/bin/activate
-          shexli "hikup@hikari03.zip"
+        uses: stuarthayhurst/shexli-github-action@v1
+        with:
+          path: "hikup@hikari03.zip"
 
       - name: Upload zip artifact
         uses: actions/upload-artifact@v4
