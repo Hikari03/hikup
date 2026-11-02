@@ -87,6 +87,30 @@ target_link_libraries(hikup-server OpenSSL::SSL)
 find_package(CURL REQUIRED)   # server-side URL fetch for `hikup transfer`
 target_link_libraries(hikup-server CURL::libcurl)
 
+# libcurl.a references its private dependencies, which the CURL::libcurl
+# target does not carry onto the link line — link them explicitly; in a
+# HIKUP_STATIC build CMAKE_FIND_LIBRARY_SUFFIXES is ".a", so these resolve
+# to the static archives
+find_library(HIKUP_NGHTTP2_LIB nghttp2 REQUIRED)
+find_library(HIKUP_CARES_LIB cares REQUIRED)
+find_library(HIKUP_PSL_LIB psl REQUIRED)
+find_library(HIKUP_Z_LIB z REQUIRED)
+find_library(HIKUP_ZSTD_LIB zstd REQUIRED)
+find_library(HIKUP_BROTLIDEC_LIB brotlidec REQUIRED)
+find_library(HIKUP_BROTLICOMMON_LIB brotlicommon REQUIRED)
+find_library(HIKUP_IDN2_LIB idn2 REQUIRED)
+find_library(HIKUP_UNISTRING_LIB unistring REQUIRED)
+target_link_libraries(hikup-server
+    ${HIKUP_NGHTTP2_LIB}
+    ${HIKUP_CARES_LIB}
+    ${HIKUP_PSL_LIB}
+    ${HIKUP_Z_LIB}
+    ${HIKUP_ZSTD_LIB}
+    ${HIKUP_BROTLIDEC_LIB}
+    ${HIKUP_BROTLICOMMON_LIB}
+    ${HIKUP_IDN2_LIB}
+    ${HIKUP_UNISTRING_LIB})
+
 include(GNUInstallDirs)
 
 install(TARGETS hikup hikup-server
