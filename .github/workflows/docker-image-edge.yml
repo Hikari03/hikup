@@ -7,7 +7,7 @@ on:
       - "src/server/**"
       - "src/shared/**"
       - "CMakeLists.txt"
-      - ".github/workflows/docker-image-edge.ym
+      - ".github/workflows/docker-image-edge.yml"
 
 jobs:
 
