@@ -32,9 +32,6 @@ int Batch::upload ( Connection& connection, const std::vector<std::string>& file
 	if ( files.empty() )
 		throw std::invalid_argument("Batch::upload: no files to operate on");
 
-	connection.sendInternal("command:BATCH_UPLOAD")
-			.sendInternal("length:" + std::to_string(files.size()));
-
 	// one row per file, labelled by its file name
 	std::vector<std::string> names;
 	names.reserve(files.size());
@@ -42,16 +39,20 @@ int Batch::upload ( Connection& connection, const std::vector<std::string>& file
 		names.push_back(std::filesystem::path(fileString).filename().string());
 
 	struct Item {
-		std::ifstream file;
-		uintmax_t size{};
+		uintmax_t size{};       // from phase 1, re-verified before sending
 		std::string name;
 		std::string hash;
-		bool refused = false;
-		std::string reason;
-		std::string httpLink;
+		bool bad = false;      // could not be opened/hashed — never announced to the server
+		bool refused = false;  // the server already had it
+		std::string reason;   // open error or refusal text
+		std::string httpLink;  // refusal link (with the original extension)
 		CommandHandlers::UploadResult result;
 	};
 	std::vector<Item> items(files.size());
+
+	// the file is reopened per transfer in phase 2 — only one descriptor is
+	// ever held at a time, so a batch of thousands of files stays under the
+	// process fd limit
 
 	// ── Phase 1: hash everything, one pacman-style block ──────────────────
 	if ( !quiet )
@@ -62,35 +63,88 @@ int Batch::upload ( Connection& connection, const std::vector<std::string>& file
 		if ( !quiet && !hashBlock.active() )
 			ui::step("hashing", names[i]);
 
-		auto [file, fileSize, fileName] = resolveFile(files[i]);
-		items[i].file = std::move(file);
-		items[i].size = fileSize;
-		items[i].name = fileName;
+		try {
+			auto [file, fileSize, fileName] = resolveFile(files[i]);
+			items[i].size = fileSize;
+			items[i].name = fileName;
 
-		const bool live = hashBlock.active();
-		items[i].hash = computeHash(items[i].file, static_cast<size_t>(fileSize), quiet,
-			live ? ui::ProgressFn{[&]( unsigned long long done, unsigned long long total, double speed ) {
-				hashBlock.update(i, total ? double(done) / double(total) : 1.0,
-				                 humanReadableSize(done) + "/" + humanReadableSize(total),
-				                 humanReadableSpeed(speed),
-				                 speed > 0 ? "eta " + ui::formatDuration(double(total - done) / speed) : "eta --");
-			}} : ui::ProgressFn{});
+			const bool live = hashBlock.active();
+			items[i].hash = computeHash(file, static_cast<size_t>(fileSize), quiet,
+				live ? ui::ProgressFn{[&]( unsigned long long done, unsigned long long total, double speed ) {
+					hashBlock.update(i, total ? double(done) / double(total) : 1.0,
+					                 humanReadableSize(done) + "/" + humanReadableSize(total),
+					                 humanReadableSpeed(speed),
+					                 speed > 0 ? "eta " + ui::formatDuration(double(total - done) / speed) : "eta --");
+				}} : ui::ProgressFn{});
+		} catch ( const std::exception& e ) {
+			// one unopenable/unreadable file must not kill the whole batch
+			items[i].bad    = true;
+			items[i].reason = e.what();
+			hashBlock.finish(i, "failed", ui::GLASS_ROSE);
+			continue;
+		}
 
 		hashBlock.finish(i, "hashed");
 		if ( !quiet && !hashBlock.active() )
 			ui::done("hashed", names[i]);
 	}
 
-	// ── Phase 2: transfer everything, second pacman-style block ───────────
-	if ( !quiet )
-		ui::step("uploading", std::to_string(files.size()) + " files");
-	ui::ProgressBlock transferBlock(names, !quiet);
+	// unopenable files are reported on stderr at the very end — nothing may
+	// print below a live block, and stdout stays parseable in quiet mode
+	const auto reportBad = [&]() {
+		for ( size_t i = 0; i < items.size(); ++i )
+			if ( items[i].bad )
+				ui::fail(names[i] + ": " + items[i].reason);
+	};
 
-	for ( size_t i = 0; i < items.size(); ++i ) {
+	// only the files that survived phase 1 are announced to the server, so
+	// its batch length stays in sync with what we actually send
+	std::vector<size_t> good;
+	good.reserve(items.size());
+	for ( size_t i = 0; i < items.size(); ++i )
+		if ( !items[i].bad )
+			good.push_back(i);
+
+	if ( good.empty() ) {
+		reportBad();
+		return 1;
+	}
+
+	std::vector<std::string> goodNames;
+	goodNames.reserve(good.size());
+	for ( const auto i : good )
+		goodNames.push_back(names[i]);
+
+	// ── Phase 2: transfer everything, second pacman-style block ───────────
+	connection.sendInternal("command:BATCH_UPLOAD")
+			.sendInternal("length:" + std::to_string(good.size()));
+
+	if ( !quiet )
+		ui::step("uploading", std::to_string(good.size()) + " files");
+	ui::ProgressBlock transferBlock(goodNames, !quiet);
+
+	for ( size_t row = 0; row < good.size(); ++row ) {
+		const size_t i = good[row];
 		auto & item = items[i];
 
 		if ( !quiet && !transferBlock.active() )
-			ui::step("sending file", std::to_string(i + 1) + '/' + std::to_string(items.size()) + ' ' + names[i]);
+			ui::step("sending file", std::to_string(row + 1) + '/' + std::to_string(good.size()) + ' ' + names[i]);
+
+		// reopen for the transfer — and make sure it is still the file we
+		// hashed (a change on disk would not match the announced hash)
+		std::ifstream file;
+		try {
+			auto resolved = resolveFile(files[i]);
+			if ( std::get<1>(resolved) != item.size || std::get<2>(resolved) != item.name )
+				throw std::runtime_error("file changed on disk since hashing");
+			file = std::move(std::get<0>(resolved));
+		} catch ( const std::exception& e ) {
+			// the server is owed this file's data after the length we
+			// announced — skipping it would desync it, so stop the batch
+			// cleanly instead of corrupting the stream
+			ui::fail(names[i] + ": " + e.what());
+			return 1;
+		}
 
 		connection.sendInternal("size:" + std::to_string(item.size))
 				.sendInternal("filename:" + item.name)
@@ -101,9 +155,11 @@ int Batch::upload ( Connection& connection, const std::vector<std::string>& file
 			// reads no data for it, so skip straight to the next file
 			item.refused  = true;
 			item.reason   = reason;
-			item.httpLink = connection.receiveInternal() + files[i].substr(files[i].find_last_of('.'));
+			item.httpLink = connection.receiveInternal();
+			if ( const size_t dot = files[i].find_last_of('.'); dot != std::string::npos )
+				item.httpLink += files[i].substr(dot);
 
-			transferBlock.finish(i, "already known", ui::GLASS_ROSE);
+			transferBlock.finish(row, "already known", ui::GLASS_ROSE);
 			if ( quiet ) {
 				std::cout << item.httpLink << '\n';
 			} else if ( !transferBlock.active() ) {
@@ -117,23 +173,27 @@ int Batch::upload ( Connection& connection, const std::vector<std::string>& file
 		}
 
 		const bool live = transferBlock.active();
-		item.result = CommandHandlers::sendFile(item.file, item.size, connection, quiet, "",
+		item.result = CommandHandlers::sendFile(file, item.size, connection, quiet, "",
 			live ? ui::ProgressFn{[&]( unsigned long long done, unsigned long long total, double speed ) {
-				transferBlock.update(i, total ? double(done) / double(total) : 1.0,
+				transferBlock.update(row, total ? double(done) / double(total) : 1.0,
 				                     humanReadableSize(done) + "/" + humanReadableSize(total),
 				                     humanReadableSpeed(speed),
 				                     speed > 0 ? "eta " + ui::formatDuration(double(total - done) / speed) : "eta --");
 			}} : ui::ProgressFn{});
 
-		transferBlock.finish(i, item.result.ok ? "done" : "failed",
+		transferBlock.finish(row, item.result.ok ? "done" : "failed",
 		                     item.result.ok ? ui::AQUA_GLASS : ui::GLASS_ROSE);
 	}
+
+	reportBad();
 
 	// ── Summary: per-file results, printed once the block has closed ──────
 	if ( !quiet && transferBlock.active() ) {
 		for ( size_t i = 0; i < items.size(); ++i ) {
 			const auto & item = items[i];
 
+			if ( item.bad )
+				continue;   // already reported above
 			if ( item.refused ) {
 				ui::fail("server refused the upload: " + item.reason);
 				ui::printTree(ui::paint("already known to the server", ui::FROSTED_STEEL), {
@@ -155,15 +215,20 @@ int Batch::upload ( Connection& connection, const std::vector<std::string>& file
 		}
 	}
 
-	return 0;
+	size_t failures = 0;
+	for ( const auto & item : items )
+		if ( item.bad || item.refused || !item.result.ok )
+			++failures;
+
+	return failures ? 1 : 0;
 }
 
 int Batch::download ( Connection& connection, const std::vector<std::string>& files, bool quiet ) {
 	if ( !connection.isConnected() )
-		throw std::invalid_argument("Batch::upload: trying to operate without active connection");
+		throw std::invalid_argument("Batch::download: trying to operate without active connection");
 
 	if ( files.empty() )
-		throw std::invalid_argument("Batch::upload: no files to operate on");
+		throw std::invalid_argument("Batch::download: no files to operate on");
 
 	connection.sendInternal("command:BATCH_DOWNLOAD")
 			.sendInternal("length:" + std::to_string(files.size()));
@@ -221,15 +286,16 @@ int Batch::download ( Connection& connection, const std::vector<std::string>& fi
 
 int Batch::remove ( Connection& connection, const std::vector<std::string>& files, bool quiet ) {
 	if ( !connection.isConnected() )
-		throw std::invalid_argument("Batch::upload: trying to operate without active connection");
+		throw std::invalid_argument("Batch::remove: trying to operate without active connection");
 
 	if ( files.empty() )
-		throw std::invalid_argument("Batch::upload: no files to operate on");
+		throw std::invalid_argument("Batch::remove: no files to operate on");
 
 	connection.sendInternal("command:BATCH_REMOVE")
 			.sendInternal("length:" + std::to_string(files.size()));
 
 	int fileNum = 0;
+	int failures = 0;
 
 	for ( const auto & fileString : files ) {
 		fileNum++;
@@ -242,6 +308,7 @@ int Batch::remove ( Connection& connection, const std::vector<std::string>& file
 
 		if ( const auto reason = connection.receiveInternal(); reason != "OK" ) {
 			ui::fail("server did not accept the request: " + reason);
+			failures++;
 			continue;
 		}
 
@@ -250,5 +317,5 @@ int Batch::remove ( Connection& connection, const std::vector<std::string>& file
 		}
 	}
 
-	return 0;
+	return failures ? 1 : 0;
 }

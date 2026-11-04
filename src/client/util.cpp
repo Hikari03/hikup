@@ -107,23 +107,17 @@ inline std::string computeHash ( std::ifstream& file, const size_t fileSize, con
 
 inline std::vector<std::string> cutStringIntoVector(std::string_view str) {
     std::vector<std::string> ret;
-    size_t start = 0;
-    size_t end = str.find_first_of(" \n\t");
+    constexpr auto sep = " 	\n\r";
 
-    while (end != std::string_view::npos) {
-        if (end != start) {
-            ret.emplace_back(str.substr(start, end - start));
-        }
-        start = end + 1;
+    // scan token by token: skip separator runs, then take up to the next one
+    size_t start = str.find_first_not_of(sep);
+    while ( start != std::string_view::npos ) {
+        size_t end = str.find_first_of(sep, start);
+        if ( end == std::string_view::npos )
+            end = str.size();
 
-    	while ( ::isspace(*str.begin()) )
-    		start++;
-
-        end = str.find_first_of(" \n\t", start);
-    }
-
-    if (start < str.size()) {
-        ret.emplace_back(str.substr(start));
+        ret.emplace_back(str.substr(start, end - start));
+        start = str.find_first_not_of(sep, end);
     }
 
     return ret;

@@ -232,6 +232,16 @@ private:
 
     // jump up onto a row, clear it, redraw, park below the block again
     void redraw ( const size_t row, const std::string& tail ) {
+        // the terminal may have been resized since the block opened — if
+        // the rows no longer fit, stop drawing instead of corrupting the
+        // screen; the last state stays visible and callers fall back to
+        // plain lines (they re-check active() on every iteration)
+        const size_t termH = terminalHeight();
+        if ( termH > 0 && termH <= rows_ + 2 ) {
+            active_ = false;
+            return;
+        }
+
         std::cout << "\033[" << (rows_ - row) << "A\r\033[K  " << name(row) << "  " << tail
                   << "\033[" << (rows_ - row) << "B\r" << std::flush;
     }
