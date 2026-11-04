@@ -19,11 +19,11 @@ namespace {
 
 void printHelp ( const std::string& argv0 ) {
     const auto prog = std::filesystem::path(argv0).filename().string();
-    auto cmd  = [](const std::string& s) { return paint(s, RUST); };
-    auto note = [](const std::string& s) { return paint(s, ASH); };
+    auto cmd  = [](const std::string& s) { return paint(s, AERO_SKY); };
+    auto note = [](const std::string& s) { return paint(s, FROSTED_STEEL); };
 
     std::cout
-        << '\n' << paint("::", RUST) << ' ' << paint(prog, BOLD) << note("  // file transfer client") << "\n\n"
+        << '\n' << paint("::", AERO_SKY) << ' ' << paint(prog, BOLD) << note("  // file transfer client") << "\n\n"
         << "  " << note("usage") << "   " << prog << " [q|v]" << cmd("<cmd>") << " <args> <server>[:port]\n\n"
         << "  " << note("commands") << '\n'
         << "    " << cmd("up")   << "  <file>        upload a file, prints its hash\n"
@@ -267,10 +267,10 @@ int start ( int argc, char* argv[] ) {
             if ( quiet ) {
                 std::cout << httpLink << '\n';
             } else {
-                std::cerr << tag("!", BRICK) << " server refused the upload: " << reason << '\n';
-                printTree(paint("    already known to the server", ASH), {
-                    { "hash", hash,     RUST  },
-                    { "link", httpLink, AMBER },
+                std::cerr << tag("!", GLASS_ROSE) << " server refused the upload: " << reason << '\n';
+                printTree(paint("    already known to the server", FROSTED_STEEL), {
+                    { "hash", hash,     AERO_SKY  },
+                    { "link", httpLink, LUMINOUS_GLASS },
                 }, std::cout);
             }
         } else {

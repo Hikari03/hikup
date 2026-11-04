@@ -1,12 +1,17 @@
+#include <array>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sodium.h>
 #include <string>
 #include <vector>
 #include <openssl/evp.h>
 
+
 #include "Color.hpp"
+#include "Style.hpp"
 #include "../shared/utils.hpp"
 
 /**
@@ -34,35 +39,8 @@ inline std::tuple<std::ifstream, uintmax_t, std::string> resolveFile ( const std
 	return {std::move(file), size, _path.filename()};
 }
 
-inline std::string colorize ( const std::string& text, Color color ) {
-	switch ( color ) {
-		case Color::RED: return "\033[38;2;255;154;168m" + text + "\033[0m";
-
-		case Color::GREEN: return "\033[38;2;123;241;196m" + text + "\033[0m";
-
-		case Color::BLUE: return "\033[38;2;56;189;248m" + text + "\033[0m";
-
-		case Color::PURPLE: return "\033[38;2;196;181;253m" + text + "\033[0m";
-
-		case Color::CYAN: return "\033[38;2;157;235;255m" + text + "\033[0m";
-
-		case Color::LL_BLUE: return "\033[38;2;233;246;255m" + text + "\033[0m";
-
-		case Color::YELLOW: return "\033[38;2;255;233;168m" + text + "\033[0m";
-
-		default: return text;
-	}
-}
-
-
-#include <array>
-#include <chrono>
-#include <memory>
-#include <openssl/evp.h>
-
-#include "Style.hpp"
-
-inline std::string computeHash ( std::ifstream& file, const size_t fileSize, const bool quiet = false ) {
+inline std::string computeHash ( std::ifstream& file, const size_t fileSize, const bool quiet = false,
+                                 const ui::ProgressFn& progress = {} ) {
 	using clock = std::chrono::steady_clock;
 
 	file.clear();
@@ -92,15 +70,20 @@ inline std::string computeHash ( std::ifstream& file, const size_t fileSize, con
 			throw std::runtime_error("hashing failed");
 		hashed += got;
 
-		if ( showProgress && clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
+		if ( clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
 			const std::chrono::duration<double> el = clock::now() - start;
 			const double speed = el.count() > 0 ? static_cast<double>(hashed) / el.count() : 0.0;
-			ui::drawBar("hashing",
-			            fileSize ? static_cast<double>(hashed) / double(fileSize) : 1.0,
-			            humanReadableSize(hashed) + "/" + humanReadableSize(fileSize),
-			            humanReadableSpeed(speed),
-			            speed > 0 ? "eta " + ui::formatDuration(static_cast<double>(fileSize - hashed) / speed) : "eta --",
-			            termW);
+
+			if ( progress )
+				// a batch progress block renders the row instead
+				progress(hashed, fileSize, speed);
+			else if ( showProgress )
+				ui::drawBar("hashing",
+				            fileSize ? static_cast<double>(hashed) / double(fileSize) : 1.0,
+				            humanReadableSize(hashed) + "/" + humanReadableSize(fileSize),
+				            humanReadableSpeed(speed),
+				            speed > 0 ? "eta " + ui::formatDuration(static_cast<double>(fileSize - hashed) / speed) : "eta --",
+				            termW);
 			lastDraw = clock::now();
 		}
 	}
@@ -114,7 +97,7 @@ inline std::string computeHash ( std::ifstream& file, const size_t fileSize, con
 	if ( EVP_DigestFinal_ex(ctx.get(), digest.data(), &digestSize) != 1 )
 		throw std::runtime_error("could not finalise hash");
 
-	if ( showProgress ) ui::clearLine();
+	if ( showProgress && !progress ) ui::clearLine();
 
 	file.clear();
 	file.seekg(0);

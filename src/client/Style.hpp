@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <unistd.h>      // isatty (Windows: <io.h>, _isatty/_fileno)
@@ -11,6 +12,10 @@
 
 namespace ui {
 
+// progress sink: (done, total, average speed in bytes/s) — batch progress
+// blocks render it; passing one suppresses the built-in single-line drawing
+using ProgressFn = std::function<void(unsigned long long, unsigned long long, double)>;
+
 // ── Aero theme (change the look here, and only here) ─────────────────────
 // Windows Vista/7 "Aero" glass: luminous sky blues, frosted chrome, soft
 // gradients and a specular sheen. Truecolor (24-bit) escapes.
@@ -18,13 +23,13 @@ inline const bool g_tty   = isatty(STDOUT_FILENO);
 inline const bool g_color = g_tty && !std::getenv("NO_COLOR");
 
 // Palette slots (names are semantic and stable, values are the aero glass):
-constexpr auto RUST  = "\033[38;2;56;189;248m";   // accent: prompts, bars, hashes (aero sky)
-constexpr auto AMBER = "\033[38;2;157;235;255m"; // sizes, links                (luminous glass)
-constexpr auto MOSS  = "\033[38;2;123;241;196m"; // success                     (aqua glass)
-constexpr auto SAND  = "\033[38;2;233;246;255m"; // names, plain values         (ice white)
-constexpr auto ASH   = "\033[38;2;138;171;191m"; // chrome, labels, secondary    (frosted steel)
-constexpr auto BRICK = "\033[38;2;255;154;168m"; // errors                      (glass rose)
-constexpr auto BOLD  = "\033[1m";
+constexpr auto AERO_SKY         = "\033[38;2;56;189;248m";  // accent: prompts, bars, hashes    (aero sky)
+constexpr auto LUMINOUS_GLASS   = "\033[38;2;157;235;255m"; // sizes, links                     (luminous glass)
+constexpr auto AQUA_GLASS       = "\033[38;2;123;241;196m"; // success                          (aqua glass)
+constexpr auto ICE_WHITE        = "\033[38;2;233;246;255m"; // names, plain values              (ice white)
+constexpr auto FROSTED_STEEL    = "\033[38;2;138;171;191m"; // chrome, labels, secondary        (frosted steel)
+constexpr auto GLASS_ROSE       = "\033[38;2;255;154;168m"; // errors                           (glass rose)
+constexpr auto BOLD             = "\033[1m";
 
 // truecolor foreground escape ("" when color is off)
 inline std::string fg ( const int r, const int g, const int b ) {
@@ -59,6 +64,12 @@ inline size_t terminalWidth() {   // 0 when piped
     return ws.ws_col;
 }
 
+inline size_t terminalHeight() {  // 0 when piped
+    winsize ws{};
+    if ( !isatty(STDOUT_FILENO) || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0 ) return 0;
+    return ws.ws_row;
+}
+
 inline std::string formatDuration(double s) {
     char buf[32];
     if ( s < 60 )        std::snprintf(buf, sizeof buf, "%.1fs", s);
@@ -69,14 +80,14 @@ inline std::string formatDuration(double s) {
 
 inline std::string styledName(const std::string& name) {   // stem ice, ".ext" frosted
     const size_t dot = name.find_last_of('.');
-    if ( dot == std::string::npos || dot == 0 ) return paint(name, SAND);
-    return paint(name.substr(0, dot), SAND) + paint(name.substr(dot), ASH);
+    if ( dot == std::string::npos || dot == 0 ) return paint(name, ICE_WHITE);
+    return paint(name.substr(0, dot), ICE_WHITE) + paint(name.substr(dot), FROSTED_STEEL);
 }
 
 inline const char* sizeColor(double bytes) {
-    if ( bytes < 1024.0 * 1024 )       return MOSS;
-    if ( bytes < 100.0 * 1024 * 1024 ) return AMBER;
-    return RUST;
+    if ( bytes < 1024.0 * 1024 )       return AQUA_GLASS;
+    if ( bytes < 100.0 * 1024 * 1024 ) return LUMINOUS_GLASS;
+    return AERO_SKY;
 }
 
 // ── Aero glass bar: gradient fill with a specular sheen on the leading edge
@@ -108,19 +119,19 @@ inline std::string glassBar ( const size_t fill, const size_t barW ) {
 
 // ── Status tags: (+) ok   (*) busy   (!) error   (-) nothing ─────────────
 inline std::string tag(const char* sym, const char* color) {
-    return paint("(", ASH) + paint(sym, color) + paint(")", ASH);
+    return paint("(", FROSTED_STEEL) + paint(sym, color) + paint(")", FROSTED_STEEL);
 }
 
 inline void step(const std::string& msg, const std::string& detail = "") {
-    std::cout << tag("*", RUST) << ' ' << msg
-              << (detail.empty() ? "" : "  " + paint(detail, ASH)) << std::endl;
+    std::cout << tag("*", AERO_SKY) << ' ' << msg
+              << (detail.empty() ? "" : "  " + paint(detail, FROSTED_STEEL)) << std::endl;
 }
 inline void done(const std::string& msg, const std::string& detail = "") {
-    std::cout << tag("+", MOSS) << ' ' << msg
-              << (detail.empty() ? "" : "  " + paint(detail, ASH)) << std::endl;
+    std::cout << tag("+", AQUA_GLASS) << ' ' << msg
+              << (detail.empty() ? "" : "  " + paint(detail, FROSTED_STEEL)) << std::endl;
 }
 inline void fail(const std::string& msg) {
-    std::cerr << tag("!", BRICK) << ' ' << msg << std::endl;
+    std::cerr << tag("!", GLASS_ROSE) << ' ' << msg << std::endl;
 }
 
     // ── Progress line (shared by hash / upload / download / encrypt / decrypt)
@@ -139,15 +150,96 @@ inline void fail(const std::string& msg) {
     const size_t barW  = termW > fixed + 8 ? std::min<size_t>(24, termW - fixed - 1) : 8;
     const size_t fill  = static_cast<size_t>(std::lround(frac * double(barW)));
 
-    std::cout << "\r\033[K" << tag("*", RUST) << ' ' << paint(verb, BOLD) << "  "
-              << paint("[", ASH) << glassBar(fill, barW) << paint("]", ASH) << "  "
-              << paint(pct, RUST) << "  "
-              << paint(sizes, SAND) << "  "
-              << paint(speed, MOSS) << "  "
-              << paint(eta, ASH) << std::flush;
+    std::cout << "\r\033[K" << tag("*", AERO_SKY) << ' ' << paint(verb, BOLD) << "  "
+              << paint("[", FROSTED_STEEL) << glassBar(fill, barW) << paint("]", FROSTED_STEEL) << "  "
+              << paint(pct, AERO_SKY) << "  "
+              << paint(sizes, ICE_WHITE) << "  "
+              << paint(speed, AQUA_GLASS) << "  "
+              << paint(eta, FROSTED_STEEL) << std::flush;
 }
 
 inline void clearLine() { std::cout << "\r\033[K" << std::flush; }
+
+// ── Pacman-style progress block ──────────────────────────────────────────
+// One line per item, all visible at once, each redrawn in place:
+//    photo.jpg    [██████████░░░░░░░░]  41%  332.0/812.0 MB  610.2 MB/s  eta 0.8s
+//    video.mp4    [░░░░░░░░░░░░░░░░░░░]
+//    report.pdf   [███████████████████]  already known
+// Rows appear (empty bar) when the block opens and keep their full bar once
+// finished. Inactive — draws nothing — when not on a TTY, when disabled
+// (quiet mode) or when there are too many rows to fit on the screen; callers
+// then fall back to plain step/done lines.
+// NOTE: nothing may print to stdout while the block is active — a line
+// printed below it shifts the cursor and breaks the redraw math.
+class ProgressBlock {
+public:
+    ProgressBlock ( const std::vector<std::string>& labels, const bool enabled = true )
+        : labels_(labels) {
+        rows_ = labels_.size();
+        for ( const auto& l : labels_ )
+            nameW_ = std::max(nameW_, displayWidth(l));
+
+        const size_t termH = terminalHeight();
+        termW_            = terminalWidth();
+        active_ = enabled && g_tty && rows_ > 0 && termH > rows_ + 2;
+
+        barW_ = std::clamp<size_t>(termW_ > nameW_ + 28 ? termW_ - nameW_ - 28 : 4, 4, 15);
+
+        if ( !active_ ) return;
+        for ( size_t i = 0; i < rows_; ++i )
+            std::cout << "  " << name(i) << "  "
+                      << paint("[", FROSTED_STEEL) << glassBar(0, barW_) << paint("]", FROSTED_STEEL) << '\n';
+        std::cout << std::flush;
+    }
+
+    bool active() const { return active_; }
+
+    void update ( const size_t row, double frac, const std::string& sizes,
+                  const std::string& speed, const std::string& eta ) {
+        if ( !active_ ) return;
+        frac = std::clamp(frac, 0.0, 1.0);
+
+        char pct[8];
+        std::snprintf(pct, sizeof pct, "%3.0f%%", frac * 100.0);
+        const size_t fill = static_cast<size_t>(std::lround(frac * double(barW_)));
+
+        redraw(row, paint("[", FROSTED_STEEL) + glassBar(fill, barW_) + paint("]", FROSTED_STEEL) + "  "
+                          + paint(pct, AERO_SKY) + "  " + paint(sizes, ICE_WHITE) + "  "
+                          + paint(speed, AQUA_GLASS) + "  " + paint(eta, FROSTED_STEEL));
+    }
+
+    // full bar + a short note ("hashed", "done", "already known", …);
+    // long notes are clipped — a wrapped row would break the redraw math
+    void finish ( const size_t row, const std::string& note, const char* noteColor = AQUA_GLASS ) {
+        if ( !active_ ) return;
+        redraw(row, paint("[", FROSTED_STEEL) + glassBar(barW_, barW_) + paint("]", FROSTED_STEEL)
+                          + "  " + paint(clip(note), noteColor));
+    }
+
+private:
+    std::string name ( const size_t row ) const {
+        return styledName(labels_[row]) + spaces(nameW_ - displayWidth(labels_[row]));
+    }
+
+    // keep a note on one line: everything past the bar's column budget goes
+    std::string clip ( const std::string& note ) const {
+        const size_t budget = termW_ > 2 + nameW_ + 2 + barW_ + 2 + 2 + 4
+                                ? termW_ - (2 + nameW_ + 2 + barW_ + 2 + 2 + 4) : 0;
+        if ( budget > 2 && displayWidth(note) > budget )
+            return note.substr(0, budget - 1) + "…";
+        return note;
+    }
+
+    // jump up onto a row, clear it, redraw, park below the block again
+    void redraw ( const size_t row, const std::string& tail ) {
+        std::cout << "\033[" << (rows_ - row) << "A\r\033[K  " << name(row) << "  " << tail
+                  << "\033[" << (rows_ - row) << "B\r" << std::flush;
+    }
+
+    std::vector<std::string> labels_;
+    size_t rows_ = 0, nameW_ = 0, barW_ = 15, termW_ = 0;
+    bool active_ = false;
+};
 
 // ── Result tree ──────────────────────────────────────────────────────────
 //  (+) uploaded 812.0 MB
@@ -163,8 +255,8 @@ inline void printTree(const std::string& header, const std::vector<Field>& field
     out << '\n' << header << '\n';
     for ( size_t i = 0; i < fields.size(); ++i ) {
         const auto& f = fields[i];
-        out << ' ' << paint(i + 1 == fields.size() ? "└─ " : "├─ ", ASH)
-            << paint(f.label + spaces(lw - displayWidth(f.label)), ASH) << "  "
+        out << ' ' << paint(i + 1 == fields.size() ? "└─ " : "├─ ", FROSTED_STEEL)
+            << paint(f.label + spaces(lw - displayWidth(f.label)), FROSTED_STEEL) << "  "
             << paint(f.value, f.color) << '\n';
     }
     out << '\n';
