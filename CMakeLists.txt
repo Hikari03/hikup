@@ -61,8 +61,9 @@ add_executable(hikup-server src/server/main.cpp
         src/shared/Connection.cpp
         src/server/HTTPFileServer.cpp
         src/server/HTTPFileServer.hpp
-        src/server/includes/mongoose.cpp
-        src/server/includes/mongoose.hpp
+        src/server/WebPages.hpp
+        src/server/includes/mongoose.c
+        src/server/includes/mongoose.h
         src/server/includes/toml.hpp
         src/shared/FileInfo.cpp
         src/shared/FileInfo.hpp

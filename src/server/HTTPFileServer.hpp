@@ -5,7 +5,7 @@
 #include <thread>
 #include <utility>
 
-#include "includes/mongoose.hpp"
+#include "includes/mongoose.h"
 
 namespace HTTPFileServerVars { // ugly i know
 	inline std::string _rootDir;

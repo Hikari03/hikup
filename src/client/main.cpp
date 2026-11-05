@@ -24,7 +24,7 @@ void printHelp ( const std::string& argv0 ) {
 
     std::cout
         << '\n' << paint("::", AERO_SKY) << ' ' << paint(prog, BOLD) << note("  // file transfer client") << "\n\n"
-        << "  " << note("usage") << "   " << prog << " [q|v]" << cmd("<cmd>") << " <args> <server>[:port]\n\n"
+        << "  " << note("usage") << "   " << prog << " [q|v|e]" << cmd("<cmd>") << " <args> <server>[:port]\n\n"
         << "  " << note("commands") << '\n'
         << "    " << cmd("up")   << "  <file>        upload a file, prints its hash\n"
         << "    " << cmd("down") << "  <hash> [dir]  download by hash (dir: directory or file path)\n"
