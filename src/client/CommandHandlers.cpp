@@ -337,7 +337,7 @@ int CommandHandlers::infoFile ( Connection& connection, const bool quiet ) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-int CommandHandlers::transferUrl ( Connection& connection, const bool quiet ) {
+int CommandHandlers::fetchUrl ( Connection& connection, const bool quiet ) {
     using clock = std::chrono::steady_clock;
 
     // live progress while the server fetches: "PROGRESS <now> <total>" lines
@@ -359,12 +359,12 @@ int CommandHandlers::transferUrl ( Connection& connection, const bool quiet ) {
 
         if ( total > 0 ) {
             const std::chrono::duration<double> el = clock::now() - startT;
-            ui::drawProgress("transferring", now, total,
+            ui::drawProgress("fetching", now, total,
                               el.count() > 0 ? double(now) / el.count() : 0.0, termW);
         } else {
             // unknown size (no Content-Length): just show what arrived
             std::cout << "\r\033[K" << ui::tag("*", ui::AERO_SKY) << ' '
-                      << ui::paint("transferring", ui::BOLD) << "  "
+                      << ui::paint("fetching", ui::BOLD) << "  "
                       << ui::paint(humanReadableSize(now) + " received", ui::ICE_WHITE) << std::flush;
         }
         lastDraw = clock::now();
@@ -374,7 +374,7 @@ int CommandHandlers::transferUrl ( Connection& connection, const bool quiet ) {
         ui::clearLine();
 
     if ( line.starts_with("failed:") ) {
-        ui::fail("transfer failed: " + line.substr(strlen("failed:")));
+        ui::fail("fetch failed: " + line.substr(strlen("failed:")));
         return 1;
     }
 
@@ -394,7 +394,7 @@ int CommandHandlers::transferUrl ( Connection& connection, const bool quiet ) {
         return 0;
     }
 
-    ui::printTree(ui::tag("+", ui::AQUA_GLASS) + " " + ui::paint("transferred", ui::BOLD), {
+    ui::printTree(ui::tag("+", ui::AQUA_GLASS) + " " + ui::paint("fetched", ui::BOLD), {
                       { "hash", hash,                               ui::AERO_SKY },
                       { "link", httpExists ? httpLink : "not available",
                               httpExists ? ui::LUMINOUS_GLASS : ui::FROSTED_STEEL },

@@ -11,7 +11,7 @@ namespace Command {
 		REMOVE,
 		LIST,
 		INFO,
-		TRANSFER,
+		FETCH,
 		BATCH,
 		QUIET,
 		SSL_VERIFY_CERT,

@@ -29,7 +29,7 @@ void printHelp ( const std::string& argv0 ) {
         << "    " << cmd("up")   << "  <file>        upload a file, prints its hash\n"
         << "    " << cmd("down") << "  <hash> [dir]  download by hash (dir: directory or file path)\n"
         << "    " << cmd("info") << "  <hash>        show file info (name, size, upload date)\n"
-        << "    " << cmd("transfer") << " <url> <server>   the server fetches the URL and stores it\n"
+        << "    " << cmd("fetch") << " <url> <user> <pass> <server>[:port]   the server fetches the URL and stores it\n"
         << "    " << cmd("rm")   << "    <hash>        remove by hash\n"
         << "    " << cmd("ls")   << "    <user> <pass> list files (credentials from server settings)\n\n"
         << "  " << note("modifiers") << " (prefix the command, e.g. qup)\n"
@@ -133,8 +133,8 @@ int start ( int argc, char* argv[] ) {
         return 1;
     }
 
-    if ( command.contains(Command::Type::TRANSFER) && command.contains(Command::Type::BATCH) ) {
-        fail("transfer does not support batch mode, give a single URL");
+    if ( command.contains(Command::Type::FETCH) && command.contains(Command::Type::BATCH) ) {
+        fail("fetch does not support batch mode, give a single URL");
         return 1;
     }
 
@@ -154,7 +154,16 @@ int start ( int argc, char* argv[] ) {
         return 1;
     }
 
-    const std::string rawServer = command.contains(Command::Type::LIST) ? argv[4] : argv[3];
+    if ( command.contains(Command::Type::FETCH) && argc != 6 ) {
+        fail("fetch needs exactly: fetch <url> <user> <pass> <server>[:port]");
+        printHelp(argv[0]);
+        return 1;
+    }
+
+    const std::string rawServer =
+        command.contains(Command::Type::LIST) ? argv[4]
+      : command.contains(Command::Type::FETCH) ? argv[5]
+      : argv[3];
     const auto ep = parseEndpoint(rawServer);
 
     Connection connection;
@@ -256,7 +265,9 @@ int start ( int argc, char* argv[] ) {
 
         connection.sendInternal("hash:" + fileName);
     }
-    else if ( command.contains(Command::Type::TRANSFER) ) {
+    else if ( command.contains(Command::Type::FETCH) ) {
+        connection.sendInternal("user:" + std::string(argv[3]));
+        connection.sendInternal("pass:" + std::string(argv[4]));
         connection.sendInternal("url:" + std::string(argv[2]));
     }
 
@@ -297,8 +308,8 @@ int start ( int argc, char* argv[] ) {
     }
     else if ( command.contains(Command::Type::INFO) )
         return CommandHandlers::infoFile(connection, quiet);
-    else if ( command.contains(Command::Type::TRANSFER) )
-        return CommandHandlers::transferUrl(connection, quiet);
+    else if ( command.contains(Command::Type::FETCH) )
+        return CommandHandlers::fetchUrl(connection, quiet);
     else if ( command.contains(Command::Type::LIST) )
         return CommandHandlers::listFiles(connection, argv[2], argv[3], quiet);
 

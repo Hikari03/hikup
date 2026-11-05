@@ -18,8 +18,8 @@ namespace Command {
 				return "LIST";
 			case Type::INFO:
 				return "INFO";
-			case Type::TRANSFER:
-				return "TRANSFER";
+			case Type::FETCH:
+				return "FETCH";
 			case Type::BATCH:
 				return "BATCH";
 			case Type::QUIET:
@@ -51,8 +51,8 @@ namespace Command {
 		if ( commands.contains(Type::INFO) )
 			return Type::INFO;
 
-		if ( commands.contains(Type::TRANSFER) )
-			return Type::TRANSFER;
+		if ( commands.contains(Type::FETCH) )
+			return Type::FETCH;
 
 		return Type::INVALID;
 	}
@@ -90,9 +90,9 @@ namespace Command {
 			command.erase(pos, 4);
 			res.emplace(Type::INFO);
 		}
-		else if ( pos = command.find("transfer"); pos != std::string::npos ) {
-			command.erase(pos, 8);
-			res.emplace(Type::TRANSFER);
+		else if ( pos = command.find("fetch"); pos != std::string::npos ) {
+			command.erase(pos, 5);
+			res.emplace(Type::FETCH);
 		}
 
 		if ( pos = command.find('q'); pos != std::string::npos ) {
