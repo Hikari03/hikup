@@ -454,7 +454,7 @@ class HikupButton extends PanelMenu.Button {
         return true;
     }
 
-    // "Upload file…" / "Transfer URL…" are the first entries of every server
+    // "Upload file…" / "Fetch URL…" are the first entries of every server
     // section regardless of which state it renders in
     _sectionPreamble(sub, server) {
         const key = serverKey(server);
@@ -516,7 +516,7 @@ class HikupButton extends PanelMenu.Button {
         upload.connect('clicked', () => this._pickFile(server));
 
         const transfer = new St.Button({
-            label: 'Transfer URL…',
+            label: 'Fetch URL…',
             style_class: 'button hikup-retry-button',
             can_focus: true,
         });
@@ -836,12 +836,14 @@ class HikupButton extends PanelMenu.Button {
         };
         this._uploads.unshift(entry);
 
-        // qtransfer streams "PROGRESS <now> <total>" lines while the server
+        // qfetch streams "PROGRESS <now> <total>" lines while the server
         // fetches, then "hash:" / "http:" like an upload
         const argv = [
             hikup,
-            server.verify ? 'qvtransfer' : 'qtransfer',
+            server.verify ? 'qvfetch' : 'qfetch',
             url,
+            String(server.user ?? ''),
+            String(server.pass ?? ''),
             String(server.address ?? ''),
         ];
 

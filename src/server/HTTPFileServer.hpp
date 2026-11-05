@@ -5,22 +5,27 @@
 #include <thread>
 #include <utility>
 
-#include "includes/mongoose.hpp"
+#include "includes/mongoose.h"
 
 namespace HTTPFileServerVars { // ugly i know
 	inline std::string _rootDir;
 	inline std::string _authUser;
 	inline std::string _authPass;
 	inline std::string _httpDisplayInBrowser;
+	inline std::string _hostname;     // for Host validation (DNS rebinding)
+	inline bool _secureCookie = false; // set when the server is fronted by TLS
 }
 
 class HTTPFileServer {
 public:
-	HTTPFileServer ( bool& turnOff, std::string rootDir, const bool httpDisplayInBrowser )
+	HTTPFileServer ( bool& turnOff, std::string rootDir, const bool httpDisplayInBrowser,
+	                 const std::string& hostname = {}, const bool secureCookies = false )
 		:	_turnOff(turnOff)
 	{
 		HTTPFileServerVars::_rootDir = std::move(rootDir);
 		HTTPFileServerVars::_httpDisplayInBrowser = httpDisplayInBrowser ? "yes" : "no";
+		HTTPFileServerVars::_hostname = hostname;
+		HTTPFileServerVars::_secureCookie = secureCookies;
 	}
 
 	[[nodiscard]] std::thread run ( std::string authUser = "admin", std::string authPass = "admin", const std::string & address = "0.0.0.0:6997" );

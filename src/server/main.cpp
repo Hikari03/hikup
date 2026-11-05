@@ -150,7 +150,7 @@ int main () {
 	if ( settings.wantHttp ) {
 		HTTPFileServer httpFileServer(
 			turnOff, std::filesystem::absolute(std::filesystem::current_path() / "links").string(),
-			settings.httpDisplayInBrowser);
+			settings.httpDisplayInBrowser, settings.hostname, settings.httpProtocol == "https");
 
 		httpThread = httpFileServer.run(settings.authUser, settings.authPass, settings.httpAddress);
 

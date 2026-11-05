@@ -54,7 +54,7 @@ private:
 
     void _handleInfo ( ConnectionServer& connection ) const;
 
-    void _handleTransfer ( ConnectionServer& connection );
+    void _handleFetch ( ConnectionServer& connection );
 
     void _handleBatchReceiveFile ( ConnectionServer& connection );
 

@@ -33,8 +33,15 @@ namespace ui {
 
 
 // ═════════════════════════════════════════════════════════════════════════
-void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize, Connection& connection, const bool quiet, const std::string& e2eKey ) {
-    if ( !file.good() ) { ui::fail("could not open file"); return; }
+CommandHandlers::UploadResult CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_type fileSize,
+                                                          Connection& connection, const bool quiet,
+                                                          const std::string& e2eKey, const ui::ProgressFn& progress ) {
+    UploadResult result;
+    if ( !file.good() ) {
+        result.error = "could not open file";
+        if ( !progress ) ui::fail(result.error);
+        return result;
+    }
 
     using clock = std::chrono::steady_clock;
     const auto total = static_cast<unsigned long long>(fileSize);
@@ -81,8 +88,12 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
             lastProgress = clock::now();
         }
 
-        if ( showProgress && clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
-            ui::drawProgress("uploading", sent, total, upTime > 0 ? static_cast<double>(sent) / upTime : 0.0, termW);
+        if ( clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
+            if ( progress )
+                // a batch progress block renders the row instead
+                progress(sent, total, upTime > 0 ? static_cast<double>(sent) / upTime : 0.0);
+            else if ( showProgress )
+                ui::drawProgress("uploading", sent, total, upTime > 0 ? static_cast<double>(sent) / upTime : 0.0, termW);
             lastDraw = clock::now();
         }
 
@@ -93,16 +104,18 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
         std::cout << "PROGRESS " << sent << ' ' << total << '\n' << std::flush;
 
     const std::chrono::duration<double> wall = clock::now() - start;
-    if ( showProgress ) ui::clearLine();
+    if ( showProgress && !progress ) ui::clearLine();
 
     if ( sent != total ) {
-        ui::fail("upload incomplete: sent " + humanReadableSize(sent) + " of " + humanReadableSize(total));
-        return;
+        result.error = "upload incomplete: sent " + humanReadableSize(sent) + " of " + humanReadableSize(total);
+        if ( !progress ) ui::fail(result.error);
+        return result;
     }
 
     if ( const auto confirmation = connection.receiveInternal(); confirmation != "OK" ) {
-        ui::fail("upload failed: " + confirmation);
-        return;
+        result.error = "upload failed: " + confirmation;
+        if ( !progress ) ui::fail(result.error);
+        return result;
     }
 
     const auto hash = connection.receiveInternal();
@@ -114,30 +127,43 @@ void CommandHandlers::sendFile ( std::ifstream& file, const std::ifstream::pos_t
         httpLink = connection.receiveInternal();
     }
 
+    result.ok = true;
+    result.seconds = wall.count();
+    result.speed = wall.count() > 0 ? double(total) / wall.count() : 0.0;
+    result.hash = hash;
+    result.httpLink = httpLink;
+
     if ( quiet ) {
         std::cout << "hash: " << hash << '\n';
         if ( !e2eKey.empty() ) std::cout << "key: " << e2eKey << '\n';
         if ( httpExists ) std::cout << "http: " << httpLink << "\n\n";
-        return;
+        return result;
     }
 
-    const double avg = wall.count() > 0 ? double(total) / wall.count() : 0.0;
+    // a batch progress block is drawing this upload — the caller renders
+    // the result so nothing prints below the block mid-flight
+    if ( progress )
+        return result;
+
+    const double avg = result.speed;
     std::vector<ui::Field> fields = {
-        { "time", ui::formatDuration(wall.count()) + " @ " + humanReadableSpeed(avg), ui::SAND },
-        { "hash", hash, ui::RUST },
+        { "time", ui::formatDuration(wall.count()) + " @ " + humanReadableSpeed(avg), ui::ICE_WHITE },
+        { "hash", hash, ui::AERO_SKY },
     };
     if ( !e2eKey.empty() )
-        fields.push_back({ "key", e2eKey, ui::AMBER });
-    fields.push_back({ "link", httpExists ? httpLink : "not available",                       httpExists ? ui::AMBER : ui::ASH });
+        fields.push_back({ "key", e2eKey, ui::LUMINOUS_GLASS });
+    fields.push_back({ "link", httpExists ? httpLink : "not available",                       httpExists ? ui::LUMINOUS_GLASS : ui::FROSTED_STEEL });
 #ifdef HIKUP_DEBUG
-    fields.push_back({ "chunk", humanReadableSize(buffer.size()), ui::ASH });
+    fields.push_back({ "chunk", humanReadableSize(buffer.size()), ui::FROSTED_STEEL });
 #endif
-    printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("uploaded", ui::BOLD) + " " + ui::paint(humanReadableSize(fileSize), ui::AMBER), fields);
+    printTree(ui::tag("+", ui::AQUA_GLASS) + " " + ui::paint("uploaded", ui::BOLD) + " " + ui::paint(humanReadableSize(fileSize), ui::LUMINOUS_GLASS), fields);
+    return result;
 }
 
 // ═════════════════════════════════════════════════════════════════════════
 std::string CommandHandlers::downloadFile ( Connection& connection, const bool quiet,
-                                             const std::filesystem::path& destination, const bool summary ) {
+                                             const std::filesystem::path& destination, const bool summary,
+                                             const ui::ProgressFn& progress ) {
     using clock = std::chrono::steady_clock;
 
     const auto fileSize = std::stoll(connection.receiveInternal());
@@ -146,7 +172,7 @@ std::string CommandHandlers::downloadFile ( Connection& connection, const bool q
     // never trust a server-supplied name as a path
     const std::string fileName = std::filesystem::path(connection.receiveInternal()).filename().string();
     if ( fileName.empty() || fileName == "." || fileName == ".." ) {
-        ui::fail("server sent an invalid file name");
+        if ( !progress ) ui::fail("server sent an invalid file name");
         return {};
     }
 
@@ -169,14 +195,18 @@ std::string CommandHandlers::downloadFile ( Connection& connection, const bool q
     connection.resizeBuffer(freeRam);
 
     std::ofstream file(outputPath, std::ios::binary);
-    if ( !file ) { ui::fail("could not create " + outputPath.string()); return {}; }
+    if ( !file ) {
+        if ( !progress ) ui::fail("could not create " + outputPath.string());
+        return {};
+    }
 
     const bool showProgress = !quiet && ui::g_tty;
     const size_t termW = ui::terminalWidth();
     unsigned long long got = 0;
 
-    if ( !quiet ) {
-        std::cout << '\n' << ui::tag("*", ui::RUST) << ' ' << ui::paint("downloading", ui::BOLD) << ' '
+    // a batch progress block shows this file as one of its rows
+    if ( !quiet && !progress ) {
+        std::cout << '\n' << ui::tag("*", ui::AERO_SKY) << ' ' << ui::paint("downloading", ui::BOLD) << ' '
                   << ui::styledName(fileName) << '\n';
     }
 
@@ -202,16 +232,22 @@ std::string CommandHandlers::downloadFile ( Connection& connection, const bool q
                 lastProgress = clock::now();
             }
 
-            if ( showProgress && clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
-                const std::chrono::duration<double> el = clock::now() - start;
-                ui::drawProgress("downloading", got, total, el.count() > 0 ? static_cast<double>(got) / el.count() : 0.0, termW);
+            if ( clock::now() - lastDraw >= std::chrono::milliseconds(80) ) {
+                if ( progress ) {
+                    // a batch progress block renders the row instead
+                    const std::chrono::duration<double> el = clock::now() - start;
+                    progress(got, total, el.count() > 0 ? static_cast<double>(got) / el.count() : 0.0);
+                } else if ( showProgress ) {
+                    const std::chrono::duration<double> el = clock::now() - start;
+                    ui::drawProgress("downloading", got, total, el.count() > 0 ? static_cast<double>(got) / el.count() : 0.0, termW);
+                }
                 lastDraw = clock::now();
             }
         });
     } catch ( const std::exception& e ) {
-        if ( showProgress )
+        if ( showProgress && !progress )
             ui::clearLine();
-        ui::fail(std::string("download failed: ") + e.what());
+        if ( !progress ) ui::fail(std::string("download failed: ") + e.what());
         file.close();
         std::error_code ec;
         std::filesystem::remove(outputPath, ec);         // no partial files
@@ -223,7 +259,7 @@ std::string CommandHandlers::downloadFile ( Connection& connection, const bool q
 
     const std::chrono::duration<double> wall = clock::now() - start;
     file.close();
-    if ( showProgress )
+    if ( showProgress && !progress )
         ui::clearLine();
 
     connection.sendInternal("OK");
@@ -232,9 +268,9 @@ std::string CommandHandlers::downloadFile ( Connection& connection, const bool q
         return fileName;
 
     const double avg = wall.count() > 0 ? double(total) / wall.count() : 0.0;
-    ui::printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("downloaded", ui::BOLD) + " " + ui::styledName(fileName), {
-                      { "size", humanReadableSize(fileSize), ui::AMBER },
-                      { "time", ui::formatDuration(wall.count()) + " @ " + humanReadableSpeed(avg), ui::SAND  },
+    ui::printTree(ui::tag("+", ui::AQUA_GLASS) + " " + ui::paint("downloaded", ui::BOLD) + " " + ui::styledName(fileName), {
+                      { "size", humanReadableSize(fileSize), ui::LUMINOUS_GLASS },
+                      { "time", ui::formatDuration(wall.count()) + " @ " + humanReadableSpeed(avg), ui::ICE_WHITE  },
                   });
     return fileName;
 }
@@ -265,9 +301,9 @@ int CommandHandlers::downloadFileE2E ( Connection& connection, const std::string
     std::filesystem::remove(temp, ec);
 
     if ( !quiet ) {
-        ui::printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("downloaded", ui::BOLD) + " " + ui::styledName(name) + ' '
-                         + ui::paint("(decrypted)", ui::ASH), {
-                          { "size", humanReadableSize(std::filesystem::file_size(name)), ui::AMBER },
+        ui::printTree(ui::tag("+", ui::AQUA_GLASS) + " " + ui::paint("downloaded", ui::BOLD) + " " + ui::styledName(name) + ' '
+                         + ui::paint("(decrypted)", ui::FROSTED_STEEL), {
+                          { "size", humanReadableSize(std::filesystem::file_size(name)), ui::LUMINOUS_GLASS },
                       });
     }
     return 0;
@@ -292,16 +328,16 @@ int CommandHandlers::infoFile ( Connection& connection, const bool quiet ) {
         return 0;
     }
 
-    ui::printTree(ui::tag("*", ui::RUST) + ' ' + ui::paint("info", ui::BOLD) + ' ' + ui::styledName(file.getName()), {
-                      { "size",     humanReadableSize(file.getSize()), ui::AMBER },
-                      { "uploaded", file.getCreationDateString_c(),    ui::SAND  },
-                      { "hash",     file.getHash(),                    ui::RUST  },
+    ui::printTree(ui::tag("*", ui::AERO_SKY) + ' ' + ui::paint("info", ui::BOLD) + ' ' + ui::styledName(file.getName()), {
+                      { "size",     humanReadableSize(file.getSize()), ui::LUMINOUS_GLASS },
+                      { "uploaded", file.getCreationDateString_c(),    ui::ICE_WHITE  },
+                      { "hash",     file.getHash(),                    ui::AERO_SKY  },
                   });
     return 0;
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-int CommandHandlers::transferUrl ( Connection& connection, const bool quiet ) {
+int CommandHandlers::fetchUrl ( Connection& connection, const bool quiet ) {
     using clock = std::chrono::steady_clock;
 
     // live progress while the server fetches: "PROGRESS <now> <total>" lines
@@ -323,13 +359,13 @@ int CommandHandlers::transferUrl ( Connection& connection, const bool quiet ) {
 
         if ( total > 0 ) {
             const std::chrono::duration<double> el = clock::now() - startT;
-            ui::drawProgress("transferring", now, total,
+            ui::drawProgress("fetching", now, total,
                               el.count() > 0 ? double(now) / el.count() : 0.0, termW);
         } else {
             // unknown size (no Content-Length): just show what arrived
-            std::cout << "\r\033[K" << ui::tag("*", ui::RUST) << ' '
-                      << ui::paint("transferring", ui::BOLD) << "  "
-                      << ui::paint(humanReadableSize(now) + " received", ui::SAND) << std::flush;
+            std::cout << "\r\033[K" << ui::tag("*", ui::AERO_SKY) << ' '
+                      << ui::paint("fetching", ui::BOLD) << "  "
+                      << ui::paint(humanReadableSize(now) + " received", ui::ICE_WHITE) << std::flush;
         }
         lastDraw = clock::now();
     }
@@ -338,7 +374,7 @@ int CommandHandlers::transferUrl ( Connection& connection, const bool quiet ) {
         ui::clearLine();
 
     if ( line.starts_with("failed:") ) {
-        ui::fail("transfer failed: " + line.substr(strlen("failed:")));
+        ui::fail("fetch failed: " + line.substr(strlen("failed:")));
         return 1;
     }
 
@@ -358,10 +394,10 @@ int CommandHandlers::transferUrl ( Connection& connection, const bool quiet ) {
         return 0;
     }
 
-    ui::printTree(ui::tag("+", ui::MOSS) + " " + ui::paint("transferred", ui::BOLD), {
-                      { "hash", hash,                               ui::RUST },
+    ui::printTree(ui::tag("+", ui::AQUA_GLASS) + " " + ui::paint("fetched", ui::BOLD), {
+                      { "hash", hash,                               ui::AERO_SKY },
                       { "link", httpExists ? httpLink : "not available",
-                              httpExists ? ui::AMBER : ui::ASH },
+                              httpExists ? ui::LUMINOUS_GLASS : ui::FROSTED_STEEL },
                   });
     return 0;
 }
@@ -400,7 +436,7 @@ int CommandHandlers::listFiles ( Connection& connection, const std::string& user
     }
 
     if ( files.empty() ) {
-        std::cout << ui::tag("-", ui::ASH) << ' ' << ui::paint("no files found", ui::ASH) << '\n';
+        std::cout << ui::tag("-", ui::FROSTED_STEEL) << ' ' << ui::paint("no files found", ui::FROSTED_STEEL) << '\n';
         return 0;
     }
 
@@ -432,19 +468,19 @@ int CommandHandlers::listFiles ( Connection& connection, const std::string& user
 
     // ── Header ───────────────────────────────────────────────────────────
     //  :: files (3)  // 813.2 MB total
-    std::cout << '\n' << ui::paint("::", ui::RUST) << ' ' << ui::paint("files", ui::BOLD)
-              << ui::paint(" (" + std::to_string(files.size()) + ")  // " + humanReadableSize(total) + " total", ui::ASH)
+    std::cout << '\n' << ui::paint("::", ui::AERO_SKY) << ' ' << ui::paint("files", ui::BOLD)
+              << ui::paint(" (" + std::to_string(files.size()) + ")  // " + humanReadableSize(total) + " total", ui::FROSTED_STEEL)
               << "\n\n";
 
-    std::string head = pad + ui::paint("name", ui::ASH) + ui::spaces(wName - 4) + gap
-                     + ui::spaces(wSize - 4) + ui::paint("size", ui::ASH) + gap
-                     + ui::paint("uploaded", ui::ASH) + ui::spaces(wDate - 8);
-    std::string rule = pad + ui::paint(ui::repeat("─", wName), ui::ASH) + gap
-                     + ui::paint(ui::repeat("─", wSize), ui::ASH) + gap
-                     + ui::paint(ui::repeat("─", wDate), ui::ASH);
+    std::string head = pad + ui::paint("name", ui::FROSTED_STEEL) + ui::spaces(wName - 4) + gap
+                     + ui::spaces(wSize - 4) + ui::paint("size", ui::FROSTED_STEEL) + gap
+                     + ui::paint("uploaded", ui::FROSTED_STEEL) + ui::spaces(wDate - 8);
+    std::string rule = pad + ui::paint(ui::repeat("─", wName), ui::FROSTED_STEEL) + gap
+                     + ui::paint(ui::repeat("─", wSize), ui::FROSTED_STEEL) + gap
+                     + ui::paint(ui::repeat("─", wDate), ui::FROSTED_STEEL);
     if ( inlineHash ) {
-        head += gap + ui::paint("hash", ui::ASH);
-        rule += gap + ui::paint(ui::repeat("─", wHash), ui::ASH);
+        head += gap + ui::paint("hash", ui::FROSTED_STEEL);
+        rule += gap + ui::paint(ui::repeat("─", wHash), ui::FROSTED_STEEL);
     }
     std::cout << head << '\n' << rule << '\n';
 
@@ -452,11 +488,11 @@ int CommandHandlers::listFiles ( Connection& connection, const std::string& user
     for ( const auto& r : rows ) {
         std::cout << pad << ui::styledName(r.name) << ui::spaces(wName - ui::displayWidth(r.name)) << gap
                   << ui::spaces(wSize - ui::displayWidth(r.size)) << ui::paint(r.size, r.sizeCol) << gap
-                  << ui::paint(r.date, ui::ASH);
+                  << ui::paint(r.date, ui::FROSTED_STEEL);
         if ( inlineHash ) {
-            std::cout << ui::spaces(wDate - ui::displayWidth(r.date)) << gap << ui::paint(r.hash, ui::RUST) << '\n';
+            std::cout << ui::spaces(wDate - ui::displayWidth(r.date)) << gap << ui::paint(r.hash, ui::AERO_SKY) << '\n';
         } else {
-            std::cout << '\n' << pad << ui::paint("└─ ", ui::ASH) << ui::paint(r.hash, ui::RUST) << '\n';
+            std::cout << '\n' << pad << ui::paint("└─ ", ui::FROSTED_STEEL) << ui::paint(r.hash, ui::AERO_SKY) << '\n';
         }
     }
 

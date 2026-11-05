@@ -28,7 +28,7 @@ _hikup() {
         down qdown vdown qvdown vqdown
         edown qedown vedown qvedown vqedown
         info qinfo vinfo qvinfo vqinfo
-        transfer qtransfer vtransfer qvtransfer vqtransfer
+        fetch qfetch vfetch qvfetch vqfetch
         rm qrm vrm qvrm vqrm
         ls qls vls qvls vqls
     )
@@ -63,11 +63,24 @@ _hikup() {
                 return 0
             fi
             ;;
-        *down*|*rm*|*info*|*transfer*)
+        *down*|*rm*|*info*)
             if [[ $cword -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "-" -- "$cur") )
                 return 0
             elif [[ $cword -eq 3 ]]; then
+                local servers
+                servers=$(_hikup_get_servers)
+                COMPREPLY=( $(compgen -W "$servers" -- "$cur") )
+                [[ "$cur" == *:* ]] && declare -F __ltrim_colon_completions >/dev/null 2>&1 && __ltrim_colon_completions "$cur"
+                return 0
+            fi
+            ;;
+        *fetch*)
+            # fetch <url> <user> <pass> <server>
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "-" -- "$cur") )
+                return 0
+            elif [[ $cword -eq 5 ]]; then
                 local servers
                 servers=$(_hikup_get_servers)
                 COMPREPLY=( $(compgen -W "$servers" -- "$cur") )

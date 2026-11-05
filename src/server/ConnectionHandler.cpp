@@ -1,11 +1,15 @@
 #include "ConnectionHandler.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <strings.h>
 #include <fstream>
 #include <set>
 #include <utility>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <curl/curl.h>
@@ -50,8 +54,8 @@ void ConnectionHandler::_serveConnection ( ClientInfo client ) {
 			_handleListFiles(connection);
 		else if ( message == "command:INFO" )
 			_handleInfo(connection);
-		else if ( message == "command:TRANSFER" )
-			_handleTransfer(connection);
+		else if ( message == "command:FETCH" )
+			_handleFetch(connection);
 		else if ( message == "command:SYNC" )
 			_syncAsSlave(connection);
 		else if ( message == "command:BATCH_UPLOAD")
@@ -85,26 +89,67 @@ bool ConnectionHandler::_auth ( const std::string& user, const std::string& pass
 	return true;
 }
 
+namespace {
+	// keep this much free space on the storage volume; writes that would
+	// eat into it are refused (uploads check their full size up front,
+	// URL transfers check every 32 MiB while streaming)
+	constexpr std::uintmax_t DISK_HEADROOM = 500ull * 1024 * 1024;
+
+	bool diskHasHeadroom ( const std::uintmax_t incoming = 0 ) {
+		std::error_code ec;
+		const auto info = std::filesystem::space(std::filesystem::current_path(), ec);
+		if ( ec )
+			return true;   // cannot tell — don't block on it
+		return info.available > DISK_HEADROOM + incoming;
+	}
+}
+
 template < ConnType T >
 void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 	const auto fileSize = stoll(connection.receiveInternal().substr(strlen("size:")));
-	auto fileName = connection.receiveInternal().substr(strlen("filename:"));
+	const auto fileName = connection.receiveInternal().substr(strlen("filename:"));
 	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
-
-	const auto oldFileName = fileName;
 
 	const auto freeRamLimit = 64 * 1024 * 1024; // 64 MB
 	const auto freeRam = std::clamp(static_cast<unsigned long>(getFreeMemory() / 4), static_cast<unsigned long>(4 * 1024 * 1024), static_cast<unsigned long>(freeRamLimit));
 
 	connection.resizeBuffer(freeRam);
 
-	// convert all '.' to '<' in the filename
-	std::ranges::replace(fileName, '.', '<');
+	// a header-stage refusal keeps the upload protocol shape: the client
+	// always reads a reason and a link message afterwards
+	const auto refuse = [&connection] ( const std::string& reason ) {
+		connection.sendInternal(reason);
+		connection.sendInternal("");   // no link
+	};
 
-	std::filesystem::path _path = std::filesystem::current_path() / "storage" / ( fileName + '.' + hashFromClient );
+	// the name must stay a single storage/ entry and the hash a real
+	// blake2s256 hex digest — anything else could steer the write outside
+	// the storage directory or poison other lookups
+	const auto nameOk = !fileName.empty() && fileName.size() <= 180
+		&& fileName.find('/') == std::string::npos
+		&& std::none_of(fileName.begin(), fileName.end(),
+			[] ( const unsigned char c ) { return c < 0x20 || c == 0x7f; });
+	const auto hashOk = hashFromClient.size() == 64
+		&& std::all_of(hashFromClient.begin(), hashFromClient.end(),
+			[] ( const unsigned char c ) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
 
-	if ( std::filesystem::exists(_path) ) {
-		const auto HTTPLinkString = HTTPFileServer::createSymlinkFor(_path);
+	if ( !nameOk ) { refuse("invalid file name"); return; }
+	if ( !hashOk ) { refuse("invalid hash"); return; }
+	if ( fileSize < 0 ) { refuse("invalid size"); return; }
+
+	// keep free-space headroom on the storage volume
+	if ( !diskHasHeadroom(static_cast<std::uintmax_t>(fileSize)) ) {
+		refuse("not enough disk space on the server");
+		return;
+	}
+
+	// dots became '<' — the storage name has no separators or dot tricks
+	auto storageName = fileName;
+	std::ranges::replace(storageName, '.', '<');
+	const auto finalPath = std::filesystem::current_path() / "storage" / (storageName + '.' + hashFromClient);
+
+	if ( std::filesystem::exists(finalPath) ) {
+		const auto HTTPLinkString = HTTPFileServer::createSymlinkFor(finalPath);
 		connection.sendInternal("file already exists");
 		connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + HTTPLinkString);
 		return;
@@ -114,8 +159,19 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
 	_markedForRemoval.remove(hashFromClient);
 
-	std::ofstream file(_path, std::ios::binary);
-	
+	// the data lands in a random .part sibling first — the final name only
+	// appears once the hash check passed, so no half-verified file is ever
+	// addressable while it streams in
+	unsigned char id[8];
+	if ( RAND_bytes(id, sizeof id) != 1 ) {
+		connection.sendInternal("could not create a temporary file");
+		return;
+	}
+	const auto partPath = std::filesystem::current_path() / "storage"
+	                   / ( "upload-" + bytesToHex(id, sizeof id) + ".part" );
+
+	std::ofstream file(partPath, std::ios::binary);
+
 	Utils::log("receiveFile: starting download of size: " + std::to_string(fileSize));
 
 	EVP_MD_CTX *mdctx;
@@ -133,18 +189,18 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
     catch ( const std::exception& e ) {
         std::cerr << "receiveFile: error receiving message: " << e.what() << std::endl;
         file.close();
-        std::filesystem::remove(_path);
+        std::filesystem::remove(partPath);
         EVP_MD_CTX_free(mdctx);
         return;
     }
 
 	file.close();
 
-    if (!success) {
-        std::filesystem::remove(_path);
-        EVP_MD_CTX_free(mdctx);
-        return;
-    }
+	if (!success) {
+		std::filesystem::remove(partPath);
+		EVP_MD_CTX_free(mdctx);
+		return;
+	}
 
 	auto hash = std::make_unique<unsigned char[]>(EVP_MAX_MD_SIZE);
 	unsigned int hashSize = EVP_MAX_MD_SIZE;
@@ -155,7 +211,7 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 	auto hashString = bytesToHex(hash.get(), hashSize);
 
 	if ( hashFromClient != hashString ) {
-		std::filesystem::remove(_path);
+		std::filesystem::remove(partPath);
 		Utils::elog(
 			"Sent hash and calculated hash do not match:\n remote: " + hashFromClient + "\n local: " + hashString);
 		_markedForRemoval.add(hashFromClient);
@@ -163,13 +219,22 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 		return;
 	}
 
-
+	// verified — move it to its final name
+	std::error_code ec;
+	std::filesystem::rename(partPath, finalPath, ec);
+	if ( ec ) {
+		std::error_code ec2;
+		std::filesystem::remove(partPath, ec2);
+		Utils::elog("receiveFile: could not move the file into place: " + ec.message());
+		connection.sendInternal("could not move the file into place");
+		return;
+	}
 
 	_readyFiles.add(hashString);
 
-	if ( std::is_same_v<T, ConnectionServer> ) {
+	if constexpr ( std::is_same_v<T, ConnectionServer> ) {
 		connection.sendInternal("OK");
-		auto HTTPLinkString = HTTPFileServer::createSymlinkFor(_path);
+		auto HTTPLinkString = HTTPFileServer::createSymlinkFor(finalPath);
 
 		connection.sendInternal(hashString);
 		connection.sendInternal(std::to_string(_settings.wantHttp));
@@ -367,7 +432,69 @@ namespace {
 		EVP_MD_CTX* md;
 		std::string suggestedName;   // from Content-Disposition, if any
 		bool ok = true;
+		bool privateTarget = false;  // the SSRF guard tripped
+		std::uintmax_t written = 0;       // for the periodic disk check
+		std::uintmax_t lastSpaceCheck = 0;
 	};
+
+	// private / loopback / link-local ranges — the fetch must never reach
+	// them (SSRF guard); unknown address families are refused too
+	bool privateV4 ( const uint32_t host ) {
+		const auto first  = (host >> 24) & 0xFF;
+		const auto second = (host >> 16) & 0xFF;
+
+		return first == 0 || first == 10 || first == 127          // this-network, private, loopback
+		    || (first == 172 && second >= 16 && second <= 31)      // 172.16/12
+		    || (first == 192 && second == 168)                     // 192.168/16
+		    || (first == 169 && second == 254)                     // link-local
+		    || (first == 100 && second >= 64 && second <= 127)     // CGNAT
+		    || first >= 224;                                       // multicast + reserved
+	}
+
+	bool privateAddress ( const sockaddr* sa ) {
+		if ( sa->sa_family == AF_INET )
+			return privateV4(ntohl(reinterpret_cast<const sockaddr_in*>(sa)->sin_addr.s_addr));
+
+		if ( sa->sa_family == AF_INET6 ) {
+			const auto* b = reinterpret_cast<const sockaddr_in6*>(sa)->sin6_addr.s6_addr;
+
+			// an IPv4-mapped address is judged by its embedded v4
+			static constexpr unsigned char mapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF};
+			if ( memcmp(b, mapped, sizeof mapped) == 0 )
+				return privateV4((uint32_t(b[12]) << 24) | (uint32_t(b[13]) << 16) | (uint32_t(b[14]) << 8)
+				               | uint32_t(b[15]));
+
+			bool allZero = true;
+			for ( int i = 0; i < 16; ++i )
+				if ( b[i] != 0 ) { allZero = false; break; }
+
+			bool loopback = true;
+			for ( int i = 0; i < 15; ++i )
+				if ( b[i] != 0 ) { loopback = false; break; }
+			loopback = loopback && b[15] == 1;
+
+			return allZero || loopback
+			    || (b[0] & 0xFE) == 0xFC                       // fc00::/7 ULA
+			    || (b[0] == 0xFE && (b[1] & 0xC0) == 0x80)      // fe80::/10 link-local
+			    || b[0] == 0xFF;                                // multicast
+		}
+
+		return true;
+	}
+
+	// curl asks us to open every socket (initial URL and each redirect):
+	// a private target is refused before the connection is even made
+	int _transferOpenSocket ( void* clientp, curlsocktype, curl_sockaddr* address ) {
+		auto* ctx = static_cast<TransferCtx*>(clientp);
+
+		if ( privateAddress(&address->addr) ) {
+			ctx->privateTarget = true;
+			return CURL_SOCKET_BAD;
+		}
+
+		const auto fd = socket(address->family, address->socktype, address->protocol);
+		return fd < 0 ? CURL_SOCKET_BAD : fd;
+	}
 
 	int _hexNibble ( const char c ) {
 		if ( c >= '0' && c <= '9' ) return c - '0';
@@ -425,6 +552,17 @@ namespace {
 		}
 
 		EVP_DigestUpdate(ctx->md, ptr, total);
+
+		// keep the disk headroom intact while the (unknown-size) body streams
+		ctx->written += total;
+		if ( (ctx->written >> 25) != (ctx->lastSpaceCheck >> 25) ) {   // every 32 MiB
+			ctx->lastSpaceCheck = ctx->written;
+			if ( !diskHasHeadroom() ) {
+				ctx->ok = false;
+				return 0;
+			}
+		}
+
 		return total;
 	}
 
@@ -502,12 +640,28 @@ namespace {
 	}
 }
 
-void ConnectionHandler::_handleTransfer ( ConnectionServer& connection ) {
+void ConnectionHandler::_handleFetch ( ConnectionServer& connection ) {
+	// the fetch is authenticated like ls: credentials before the URL
+	const std::string user = connection.receiveInternal();
+	const std::string pass = connection.receiveInternal();
+
+	if ( !_auth(user, pass) ) {
+		Utils::log("_handleTransfer: invalid credentials");
+		connection.sendInternal("Invalid credentials");
+		return;
+	}
+
 	const auto url = connection.receiveInternal().substr(strlen("url:"));
 
 	if ( !url.starts_with("http://") && !url.starts_with("https://") ) {
 		Utils::log("_handleTransfer: unsupported URL: " + url);
 		connection.sendInternal("unsupported URL, only http and https are allowed");
+		return;
+	}
+
+	// keep free-space headroom on the storage volume before we start
+	if ( !diskHasHeadroom() ) {
+		connection.sendInternal("not enough disk space on the server");
 		return;
 	}
 
@@ -557,6 +711,9 @@ void ConnectionHandler::_handleTransfer ( ConnectionServer& connection ) {
 	curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &connection);
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, _transferHeader);
 	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &ctx);
+	// SSRF guard: every socket (initial URL and redirects) goes through it
+	curl_easy_setopt(curl, CURLOPT_OPENSOCKETFUNCTION, _transferOpenSocket);
+	curl_easy_setopt(curl, CURLOPT_OPENSOCKETDATA, &ctx);
 
 	// job accepted — the client now shows live progress until the result
 	connection.sendInternal("OK");
@@ -581,7 +738,9 @@ void ConnectionHandler::_handleTransfer ( ConnectionServer& connection ) {
 		std::filesystem::remove(tempPath);
 
 		std::string reason = "fetch failed: ";
-		if ( response >= 400 )
+		if ( ctx.privateTarget )
+			reason += "the target address is private";
+		else if ( response >= 400 )
 			reason += "HTTP " + std::to_string(response);
 		else
 			reason += ctx.ok ? curl_easy_strerror(result) : "write error on the server";
@@ -667,6 +826,7 @@ void ConnectionHandler::_sendFileInSync ( T& connection, const std::string& file
 
 	if ( connection.receiveInternal() != "OK" ) {
 		Utils::log("For some reason remote already has the file, skipping.");
+		connection.receiveInternal();   // refusals carry a link slot — consume it
 		return;
 	}
 
