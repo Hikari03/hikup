@@ -85,7 +85,7 @@ find_package(OpenSSL REQUIRED)
 target_link_libraries(hikup OpenSSL::SSL)
 target_link_libraries(hikup-server OpenSSL::SSL)
 
-find_package(CURL REQUIRED)   # server-side URL fetch for `hikup transfer`
+find_package(CURL REQUIRED)   # server-side URL fetch for `hikup fetch`
 target_link_libraries(hikup-server CURL::libcurl)
 
 # libcurl.a references its private dependencies, which the CURL::libcurl
@@ -121,15 +121,18 @@ install(FILES hikup-completion.bash
         DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
         RENAME hikup)
 
+# shared data root (created by the install rule below, owned by the
+# installing user): the saved-servers list and the system-wide trust store
+set(HIKUP_DATA_DIR "${CMAKE_INSTALL_FULL_DATADIR}/hikup")
+
 install(CODE "
     execute_process(COMMAND id -un OUTPUT_VARIABLE CURRENT_USER OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(COMMAND id -gn OUTPUT_VARIABLE CURRENT_GROUP OUTPUT_STRIP_TRAILING_WHITESPACE)
-    set(DEST_DIR \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/hikup\")
-    set(DEST_FILE \"\${DEST_DIR}/servers\")
-    file(MAKE_DIRECTORY \"\${DEST_DIR}\")
-    if(NOT EXISTS \"\${DEST_FILE}\")
-        file(TOUCH \"\${DEST_FILE}\")
+    file(MAKE_DIRECTORY \"\$ENV{DESTDIR}${HIKUP_DATA_DIR}\")
+    file(MAKE_DIRECTORY \"\$ENV{DESTDIR}${HIKUP_DATA_DIR}/trusted-certs\")
+    if(NOT EXISTS \"\$ENV{DESTDIR}${HIKUP_DATA_DIR}/servers\")
+        file(TOUCH \"\$ENV{DESTDIR}${HIKUP_DATA_DIR}/servers\")
     endif()
-    execute_process(COMMAND chown \"\${CURRENT_USER}:\${CURRENT_GROUP}\" \"\${DEST_DIR}\" \"\${DEST_FILE}\"
+    execute_process(COMMAND chown \"\${CURRENT_USER}:\${CURRENT_GROUP}\" \"\$ENV{DESTDIR}${HIKUP_DATA_DIR}\" \"\$ENV{DESTDIR}${HIKUP_DATA_DIR}/servers\" \"\$ENV{DESTDIR}${HIKUP_DATA_DIR}/trusted-certs\"
                     ERROR_QUIET OUTPUT_QUIET)
 ")

@@ -74,6 +74,14 @@ public:
 
 	bool isConnected () const;
 
+	// the server's certificate chain in PEM form (leaf + issuers), empty
+	// when none was presented (after the handshake — used by fetch-cert)
+	std::string peerCertificatePem () const;
+
+	// true when the loaded trust anchors came from the working directory
+	// (the last-resort store) — clients warn about it when verifying
+	bool trustStoreFromWorkingDir () const;
+
 	void resizeBuffer ( unsigned long newSize );
 
 	void close ();
@@ -91,6 +99,7 @@ private:
 	size_t _sizeOfPreviousMessage = 0;
 	bool _active = true;
 	bool _moreInBuffer = false;
+	bool _trustStoreFromWorkingDir = false;
 
 	void clearBuffer () const;
 

@@ -12,6 +12,10 @@
 #include <sys/ioctl.h>   // Windows: GetConsoleScreenBufferInfo
 #include <unistd.h>      // isatty (Windows: <io.h>, _isatty/_fileno)
 #include <vector>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 
 #include "Color.hpp"     // drop if nothing else in this file uses colorize()
 #include "E2E.hpp"
@@ -398,6 +402,107 @@ int CommandHandlers::fetchUrl ( Connection& connection, const bool quiet ) {
                       { "hash", hash,                               ui::AERO_SKY },
                       { "link", httpExists ? httpLink : "not available",
                               httpExists ? ui::LUMINOUS_GLASS : ui::FROSTED_STEEL },
+                  });
+    return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+namespace {
+    // "Nov  4 12:00:00 2026 GMT" — good enough for the summary tree
+    std::string asn1TimeString ( const ASN1_TIME* t ) {
+        const auto bio = BIO_new(BIO_s_mem());
+        if ( bio == nullptr )
+            return {};
+
+        ASN1_TIME_print(bio, t);
+
+        char* data = nullptr;
+        const auto len = BIO_get_mem_data(bio, &data);
+        std::string out(data, len);
+        BIO_free(bio);
+        return out;
+    }
+}
+
+int CommandHandlers::fetchCert ( Connection& connection, const std::string& host, const int port, const bool quiet ) {
+    const auto pem = connection.peerCertificatePem();
+    if ( pem.empty() ) {
+        ui::fail("the server did not present a certificate");
+        return 1;
+    }
+
+    // parse it back for the summary the user should compare out of band
+    const auto memBio = BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size()));
+    const std::unique_ptr<X509, decltype(&X509_free)> cert(
+        memBio != nullptr ? PEM_read_bio_X509(memBio, nullptr, nullptr, nullptr) : nullptr, &X509_free);
+    BIO_free(memBio);
+    if ( cert == nullptr ) {
+        ui::fail("could not parse the certificate the server presented");
+        return 1;
+    }
+
+    char subject[256] = {0}, issuer[256] = {0};
+    X509_NAME_oneline(X509_get_subject_name(cert.get()), subject, sizeof subject);
+    X509_NAME_oneline(X509_get_issuer_name(cert.get()), issuer, sizeof issuer);
+
+    unsigned char md[EVP_MAX_MD_SIZE] = {0};
+    unsigned int mdLen = 0;
+    X509_digest(cert.get(), EVP_sha256(), md, &mdLen);
+    const auto fingerprint = bytesToHex(md, mdLen);
+
+    const auto valid = asn1TimeString(X509_get0_notBefore(cert.get())) + " — "
+                     + asn1TimeString(X509_get0_notAfter(cert.get()));
+
+    // the per-user trust store: ~/.config/hikup/trusted-certs
+    std::filesystem::path configHome;
+    if ( const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0' )
+        configHome = xdg;
+    else if ( const char* home = std::getenv("HOME"); home != nullptr && *home != '\0' )
+        configHome = std::filesystem::path(home) / ".config";
+    else {
+        ui::fail("could not determine the config directory (HOME is unset)");
+        return 1;
+    }
+
+    const auto dir = configHome / "hikup" / "trusted-certs";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if ( ec ) {
+        ui::fail("could not create " + dir.string() + ": " + ec.message());
+        return 1;
+    }
+
+    auto name = host;
+    if ( port != 6998 )
+        name += "-" + std::to_string(port);   // keep servers on one host apart
+    const auto target = dir / (name + ".pem");
+
+    const bool replaced = std::filesystem::exists(target, ec);
+
+    std::ofstream out(target, std::ios::trunc);
+    if ( !out ) {
+        ui::fail("could not write " + target.string());
+        return 1;
+    }
+    out << pem;
+    out.close();
+    std::filesystem::permissions(target,
+        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write
+      | std::filesystem::perms::group_read | std::filesystem::perms::others_read, ec);
+
+    if ( quiet ) {
+        std::cout << "cert: " << target.string() << '\n'
+                  << "sha256: " << fingerprint << '\n';
+        return 0;
+    }
+
+    ui::printTree(ui::tag("+", ui::AQUA_GLASS) + " " + ui::paint("certificate chain stored", ui::BOLD)
+                  + (replaced ? ui::paint("  (replaced an existing one)", ui::GLASS_ROSE) : ""), {
+                      { "subject", subject,      ui::ICE_WHITE },
+                      { "issuer",  issuer,       ui::FROSTED_STEEL },
+                      { "valid",   valid,         ui::FROSTED_STEEL },
+                      { "sha256",  fingerprint,   ui::AERO_SKY },
+                      { "path",    target.string(), ui::LUMINOUS_GLASS },
                   });
     return 0;
 }

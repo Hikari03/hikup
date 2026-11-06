@@ -25,6 +25,7 @@
 - `hikup down <hash> <server-address>[:port] [destination]`: Download a file; `destination` is an optional directory (keeps the server-side name) or file path, defaulting to the current directory.
 - `hikup info <hash> <server-address>[:port]`: Show file metadata (name, size, upload date) without downloading it.
 - `hikup fetch <url> <user> <pass> <server-address>[:port]`: The server itself fetches the URL (http/https, redirects followed) and stores it like an upload; prints the hash and link. Requires the same credentials as `ls`. Shows live progress of the server-side fetch. The stored name is what the remote suggests — the `Content-Disposition` header when present, otherwise the final URL path after redirects. Targets in private address ranges are refused.
+- `hikup fetch-cert <server-address>[:port]`: Download the server's certificate into the trust store (`~/.config/hikup/trusted-certs`) and show its subject, issuer, validity and SHA-256 fingerprint — compare the fingerprint with the server owner out of band, then use the `v`-prefixed commands to verify. Re-running replaces the stored certificate. With `v` (`vfetch-cert`) the connection itself is verified against the store first.
 - `hikup rm <hash> <server-address>[:port]`: Remove a file.
 - `hikup ls <user> <pass> <server-address>[:port]`: List all files (requires authentication).
 - add `q` into first argument for quiet run: like qup, qdown, ...
@@ -74,6 +75,7 @@ cmake --build build --target hikup -j $(nproc)
 - Expected name for chain certificate is `server_fullchain.pem` and for private key `server_key.pem`.
 - When no certificate or key is present, server will generate its own CA and certificate.
 - If this happens, the hostname declared in settings will be used. You will also need to add the `ca_cert.pem` as your trusted CA.
+- Client trust anchors are searched in this order, first existing wins: `$HIKUP_TRUSTED_CERTS` (a file or directory), `~/.config/hikup/trusted-certs`, `/usr/share/hikup/trusted-certs` (created by `make install`), and finally `./trusted-certs` — which prints a warning when verifying (`v` commands), since a trust store that depends on the working directory is easy to plant. A certificate that fails to load aborts the connection instead of being silently skipped.
 
 ### Sync
 - Sync files between servers in declared periods.

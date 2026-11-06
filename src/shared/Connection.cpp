@@ -1,9 +1,65 @@
 #include "Connection.hpp"
 
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <vector>
 #include <openssl/err.h>
+#include <openssl/pem.h>
 #include <openssl/ssl.h>
+
+namespace {
+
+// candidate trust stores, in order — first existing one wins, so a fixed
+// location always beats a planted trusted-certs/ in whatever directory the
+// client happens to run from
+std::vector<std::filesystem::path> trustStores () {
+	if ( const char* env = std::getenv("HIKUP_TRUSTED_CERTS"); env != nullptr && *env != '\0' ) {
+		const auto p = std::filesystem::path(env);
+		if ( !std::filesystem::exists(p) )
+			throw std::runtime_error("HIKUP_TRUSTED_CERTS does not exist: " + std::string(env));
+		return {p};   // an explicit override is the only store considered
+	}
+
+	std::vector<std::filesystem::path> stores;
+
+	// per-user: XDG_CONFIG_HOME (default ~/.config)/hikup/trusted-certs
+	std::string configHome;
+	if ( const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0' )
+		configHome = xdg;
+	else if ( const char* home = std::getenv("HOME"); home != nullptr && *home != '\0' )
+		configHome = std::string(home) + "/.config";
+	if ( !configHome.empty() )
+		stores.emplace_back(configHome + "/hikup/trusted-certs");
+
+	// system-wide, matching the saved-servers file convention
+	stores.emplace_back("/usr/share/hikup/trusted-certs");
+
+	// last resort: the working directory (the server's fixed root, or a
+	// client run deliberately from its trust dir)
+	stores.emplace_back("trusted-certs");
+
+	return stores;
+}
+
+// loads one trust store: a single certificate file or a directory of them.
+// A file that fails to parse throws — a broken trust anchor must never mean
+// "verify anyway"
+void loadTrustStore ( SSL_CTX* ctx, const std::filesystem::path& p ) {
+	std::error_code ec;
+	if ( std::filesystem::is_regular_file(p, ec) ) {
+		if ( !SSL_CTX_load_verify_locations(ctx, p.c_str(), nullptr) )
+			throw std::runtime_error("could not load certificate: " + p.string());
+		return;
+	}
+
+	for ( const auto& cert : std::filesystem::directory_iterator(p) ) {
+		if ( !SSL_CTX_load_verify_locations(ctx, cert.path().c_str(), nullptr) )
+			throw std::runtime_error("could not load certificate: " + cert.path().string());
+	}
+}
+
+} // namespace
 
 Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_unique<char[]>(bufferSize)), _bufferSize(bufferSize) {
 	_ctx = SSL_CTX_new(OSSL_QUIC_client_method());
@@ -13,9 +69,15 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 
 	SSL_CTX_set_default_verify_paths(_ctx);
 
-	if ( std::filesystem::exists("trusted-certs") )
-		for ( const auto & cert : std::filesystem::directory_iterator("trusted-certs") )
-			if (!SSL_CTX_load_verify_locations(_ctx, cert.path().c_str() , nullptr))
+	for ( const auto& store : trustStores() ) {
+		std::error_code ec;
+		if ( !std::filesystem::exists(store, ec) )
+			continue;
+
+		_trustStoreFromWorkingDir = store == "trusted-certs";
+		loadTrustStore(_ctx, store);
+		break;   // first existing store wins
+	}
 
 	memset(_buffer.get(), '\0', _bufferSize);
 }
@@ -486,6 +548,51 @@ std::string Connection::receiveData () {
 
 bool Connection::isConnected () const {
 	return _active;
+}
+
+std::string Connection::peerCertificatePem () const {
+	if ( _ssl == nullptr )
+		return {};
+
+	// the whole presented chain, not just the leaf: the issuers are what
+	// verification needs as trust anchors (on the client side the stack
+	// also contains the peer's own certificate)
+	std::string pem;
+	if ( const auto chain = SSL_get_peer_cert_chain(_ssl); chain != nullptr ) {
+		for ( int i = 0; i < sk_X509_num(chain); ++i ) {
+			const auto bio = BIO_new(BIO_s_mem());
+			PEM_write_bio_X509(bio, sk_X509_value(chain, i));
+
+			char* data = nullptr;
+			const auto len = BIO_get_mem_data(bio, &data);
+			pem.append(data, len);
+
+			BIO_free(bio);
+		}
+	}
+
+	if ( !pem.empty() )
+		return pem;
+
+	// no chain available — fall back to the leaf alone
+	const auto cert = SSL_get1_peer_certificate(_ssl);
+	if ( cert == nullptr )
+		return {};
+
+	const auto bio = BIO_new(BIO_s_mem());
+	PEM_write_bio_X509(bio, cert);
+
+	char* data = nullptr;
+	const auto len = BIO_get_mem_data(bio, &data);
+	std::string leaf(data, len);
+
+	BIO_free(bio);
+	X509_free(cert);
+	return leaf;
+}
+
+bool Connection::trustStoreFromWorkingDir () const {
+	return _trustStoreFromWorkingDir;
 }
 
 void Connection::resizeBuffer ( const unsigned long newSize )  {

@@ -30,6 +30,7 @@ void printHelp ( const std::string& argv0 ) {
         << "    " << cmd("down") << "  <hash> [dir]  download by hash (dir: directory or file path)\n"
         << "    " << cmd("info") << "  <hash>        show file info (name, size, upload date)\n"
         << "    " << cmd("fetch") << " <url> <user> <pass> <server>[:port]   the server fetches the URL and stores it\n"
+        << "    " << cmd("fetch-cert") << " <server>[:port]   store the server's certificate in the trust store\n"
         << "    " << cmd("rm")   << "    <hash>        remove by hash\n"
         << "    " << cmd("ls")   << "    <user> <pass> list files (credentials from server settings)\n\n"
         << "  " << note("modifiers") << " (prefix the command, e.g. qup)\n"
@@ -106,10 +107,22 @@ struct TempCleaner {
     }
 };
 
+// short, themed note when verification uses trust anchors from the working
+// directory — printed only for `v` commands, since that is when it matters
+void warnWorkingDirTrust ( const Connection& connection ) {
+    if ( connection.trustStoreFromWorkingDir() )
+        std::cerr << tag("!", GLASS_ROSE) << ' '
+                  << paint("trust anchors come from ./trusted-certs — prefer ~/.config/hikup/trusted-certs", FROSTED_STEEL)
+                  << std::endl;
+}
+
 } // namespace
 
 int start ( int argc, char* argv[] ) {
-    if ( argc < 4 ) {
+    // every command takes at least two arguments — its target and the
+    // server — except fetch-cert, which takes only the server
+    const bool fetchCertOnly = argc >= 2 && std::strstr(argv[1], "fetch-cert") != nullptr;
+    if ( argc < (fetchCertOnly ? 3 : 4) ) {
         printHelp(argv[0]);
         return 1;
     }
@@ -138,6 +151,17 @@ int start ( int argc, char* argv[] ) {
         return 1;
     }
 
+    if ( command.contains(Command::Type::FETCH_CERT) && command.contains(Command::Type::BATCH) ) {
+        fail("fetch-cert does not support batch mode, give a single server");
+        return 1;
+    }
+
+    if ( command.contains(Command::Type::FETCH_CERT) && argc != 3 ) {
+        fail("fetch-cert needs exactly: fetch-cert <server>[:port]");
+        printHelp(argv[0]);
+        return 1;
+    }
+
     if ( e2e && !( command.contains(Command::Type::UPLOAD) || command.contains(Command::Type::DOWNLOAD) ) ) {
         fail("e2e is only supported for up and down");
         return 1;
@@ -163,10 +187,33 @@ int start ( int argc, char* argv[] ) {
     const std::string rawServer =
         command.contains(Command::Type::LIST) ? argv[4]
       : command.contains(Command::Type::FETCH) ? argv[5]
+      : command.contains(Command::Type::FETCH_CERT) ? argv[2]
       : argv[3];
     const auto ep = parseEndpoint(rawServer);
 
     Connection connection;
+
+    // ── fetch-cert is fully client-side: handshake, take the certificate,
+    // store it in the trust store, disconnect — no server command needed
+    if ( command.contains(Command::Type::FETCH_CERT) ) {
+        try {
+            if ( !quiet ) step("connecting", ep.host + ":" + std::to_string(ep.port));
+            connection.connectToServer(ep.host, ep.port, SSLVerifyCert);
+            saveServer(rawServer);
+        } catch ( const std::exception& e ) {
+            fail(e.what());
+            return 1;
+        }
+        if ( SSLVerifyCert )
+            warnWorkingDirTrust(connection);
+
+        const auto rc = CommandHandlers::fetchCert(connection, ep.host, ep.port, quiet);
+
+        // a benign unknown command lets the server close without logging an error
+        try { connection.sendInternal("command:CLOSE"); } catch ( ... ) {}
+
+        return rc;
+    }
 
     // ── Batch mode: list of files/hashes on stdin ────────────────────────
     if ( ( command.contains(Command::Type::UPLOAD) ||
@@ -190,6 +237,8 @@ int start ( int argc, char* argv[] ) {
             fail(e.what());
             return 1;
         }
+        if ( SSLVerifyCert )
+            warnWorkingDirTrust(connection);
 
         return Batch::autoResolve(command, connection, files, quiet);
     }
@@ -234,6 +283,8 @@ int start ( int argc, char* argv[] ) {
         connection.connectToServer(ep.host, ep.port, SSLVerifyCert);
         saveServer(rawServer);
         if ( !quiet ) done("connected");
+        if ( SSLVerifyCert )
+            warnWorkingDirTrust(connection);
     }
     catch ( std::runtime_error& e ) {
         fail(e.what());

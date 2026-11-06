@@ -20,6 +20,8 @@ namespace Command {
 				return "INFO";
 			case Type::FETCH:
 				return "FETCH";
+			case Type::FETCH_CERT:
+				return "FETCH_CERT";
 			case Type::BATCH:
 				return "BATCH";
 			case Type::QUIET:
@@ -89,6 +91,11 @@ namespace Command {
 		else if ( pos = command.find("info"); pos != std::string::npos ) {
 			command.erase(pos, 4);
 			res.emplace(Type::INFO);
+		}
+		// must be matched before "fetch" — it contains it
+		else if ( pos = command.find("fetch-cert"); pos != std::string::npos ) {
+			command.erase(pos, 10);
+			res.emplace(Type::FETCH_CERT);
 		}
 		else if ( pos = command.find("fetch"); pos != std::string::npos ) {
 			command.erase(pos, 5);
