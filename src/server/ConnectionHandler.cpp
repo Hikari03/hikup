@@ -108,7 +108,7 @@ namespace {
 }
 
 template < ConnType T >
-void ConnectionHandler::_handleReceiveFile ( T& connection ) {
+void ConnectionHandler::_handleReceiveFile ( T& connection, [[maybe_unused]] const bool clientUpload ) {
 	const auto fileSize = stoll(connection.receiveInternal().substr(strlen("size:")));
 	const auto fileName = connection.receiveInternal().substr(strlen("filename:"));
 	const auto hashFromClient = connection.receiveInternal().substr(strlen("hash:"));
@@ -235,14 +235,24 @@ void ConnectionHandler::_handleReceiveFile ( T& connection ) {
 
 	_readyFiles.add(hashString);
 
-	if constexpr ( std::is_same_v<T, ConnectionServer> ) {
-		connection.sendInternal("OK");
-		auto HTTPLinkString = HTTPFileServer::createSymlinkFor(finalPath);
+	// the links/ entry belongs to every copy of the file, not only to
+	// client uploads: a file pulled in over sync (T = Connection) must be
+	// reachable from the web UI too, or the listing shows it while
+	// serving it 404s
+	[[maybe_unused]] const auto HTTPLinkString = HTTPFileServer::createSymlinkFor(finalPath);
 
-		connection.sendInternal(hashString);
-		connection.sendInternal(std::to_string(_settings.wantHttp));
-		if ( _settings.wantHttp && connection.receiveInternal() == "getHttpLink" )
-			connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + HTTPLinkString);
+	// the trailing exchange (result, hash, optional http link) is the
+	// client-upload protocol — a sync peer speaks neither side of it:
+	// leftover messages desync the next transferred file, and the
+	// getHttpLink wait would hang the sync thread for good
+	if constexpr ( std::is_same_v<T, ConnectionServer> ) {
+		if ( clientUpload ) {
+			connection.sendInternal("OK");
+			connection.sendInternal(hashString);
+			connection.sendInternal(std::to_string(_settings.wantHttp));
+			if ( _settings.wantHttp && connection.receiveInternal() == "getHttpLink" )
+				connection.sendInternal(_settings.httpProtocol + "://" + _settings.hostname + "/" + HTTPLinkString);
+		}
 	}
 }
 
@@ -917,7 +927,7 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
 		Utils::log(
 			"ConnectionHandler::_syncAsSlave: getting file " + std::to_string(i + 1) + "/" + std::to_string(
 				toGet.size()));
-		_handleReceiveFile(connection);
+		_handleReceiveFile(connection, false);
 	}
 
 	const auto toSendFileNames = Utils::FS::findCorrespondingFileNames(toSend);

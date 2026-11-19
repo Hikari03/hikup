@@ -42,7 +42,7 @@ private:
     [[nodiscard]] bool _auth ( const std::string& user, const std::string& pass ) const;
 
     template < ConnType T >
-    void _handleReceiveFile ( T& connection );
+    void _handleReceiveFile ( T& connection, bool clientUpload = true );
 
     void _handleSendFile ( ConnectionServer& connection );
 
