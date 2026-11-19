@@ -930,10 +930,83 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
 	Utils::log("Incoming sync complete");
 }
 
+// trust-on-first-use for verified sync targets: connect once without
+// verification, pin the certificate the target presents, and let the
+// verified connection that follows validate against it. Does nothing when
+// an anchor is already pinned for the target — a changed key must fail
+// the sync, never silently replace the pin.
+void ConnectionHandler::_pinSyncTargetCert ( const std::string& address, const int port ) {
+	auto name = address;
+	if ( port != 6998 )
+		name += "-" + std::to_string(port);   // same convention as fetch-cert
+
+	const auto store = Connection::pinnableTrustStoreDir();
+	if ( store.empty() ) {
+		Utils::elog("ConnectionHandler::_pinSyncTargetCert: no writable trust store "
+			"directory — pin the certificate for " + name + " manually");
+		return;
+	}
+
+	const auto target = store / (name + ".pem");
+	std::error_code ec;
+	if ( std::filesystem::exists(target, ec) )
+		return;   // already pinned; the verified connect is the authority
+
+	Connection probe;
+	probe.connectToServer(address, port, false);
+	const auto pem = probe.peerCertificatePem();
+	// a benign unknown command lets the target close without logging an error
+	try { probe.sendInternal("command:CLOSE"); } catch ( ... ) {}
+
+	if ( pem.empty() ) {
+		Utils::elog("ConnectionHandler::_pinSyncTargetCert: " + name
+			+ " presented no certificate, cannot pin");
+		return;
+	}
+
+	std::filesystem::create_directories(store, ec);
+	if ( ec ) {
+		Utils::elog("ConnectionHandler::_pinSyncTargetCert: could not create "
+			+ store.string() + ": " + ec.message());
+		return;
+	}
+
+	// write to a sibling temp file and rename it into place — a full disk
+	// must never leave a truncated trust anchor behind
+	auto tmp = target;
+	tmp += ".new";
+	{
+		std::ofstream out(tmp, std::ios::trunc);
+		if ( !out ) {
+			Utils::elog("ConnectionHandler::_pinSyncTargetCert: could not write " + tmp.string());
+			return;
+		}
+		out << pem;
+		out.close();
+		if ( !out ) {
+			std::error_code rm;
+			std::filesystem::remove(tmp, rm);
+			Utils::elog("ConnectionHandler::_pinSyncTargetCert: could not write "
+				+ tmp.string() + " completely");
+			return;
+		}
+	}
+	std::filesystem::rename(tmp, target, ec);
+	if ( ec ) {
+		std::error_code rm;
+		std::filesystem::remove(tmp, rm);
+		Utils::elog("ConnectionHandler::_pinSyncTargetCert: could not move " + tmp.string()
+			+ " into place: " + ec.message());
+		return;
+	}
+
+	Utils::log("ConnectionHandler::_pinSyncTargetCert: pinned the certificate of "
+		+ name + " to " + target.string());
+}
+
 void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 	// send command type and authenticate
 	std::lock_guard lock(_syncMutex);
-	Connection connection;
 
 	std::string address = target.targetAddress;
 	int port = 6998;
@@ -944,7 +1017,28 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 		} catch (...) {}
 	}
 
-	connection.connectToServer(address, port, target.tlsCertVerify);
+	// A verified target connects directly when its CA is already anchored
+	// (e.g. ca_cert.pem in the store); only when that fails and nothing is
+	// pinned for it yet does _pinSyncTargetCert trust on first use — pin
+	// what the target presents and retry verified. An already-pinned
+	// target is never re-pinned, so a changed key fails the retry instead.
+	// A fresh Connection is built for the retry so it loads the new anchor.
+	std::unique_ptr<Connection> connectionPtr;
+	if ( target.tlsCertVerify ) {
+		auto verified = std::make_unique<Connection>();
+		try {
+			verified->connectToServer(address, port, true);
+		} catch ( const std::exception& ) {
+			_pinSyncTargetCert(address, port);
+			verified = std::make_unique<Connection>();
+			verified->connectToServer(address, port, true);
+		}
+		connectionPtr = std::move(verified);
+	} else {
+		connectionPtr = std::make_unique<Connection>();
+		connectionPtr->connectToServer(address, port, false);
+	}
+	Connection& connection = *connectionPtr;
 
 	connection.sendInternal("command:SYNC")
 		.sendInternal("user:" + target.targetUser)

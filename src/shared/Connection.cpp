@@ -74,6 +74,21 @@ void loadTrustStore ( SSL_CTX* ctx, const std::filesystem::path& p ) {
 
 } // namespace
 
+// where an automatically pinned anchor belongs so the next Connection
+// constructed here loads it: the store that wins the candidate chain.
+// Empty when that store is a single certificate file (never modified
+// automatically). When no store exists at all, the working-directory one
+// is next in line, so pinning there also makes it the winner.
+std::filesystem::path Connection::pinnableTrustStoreDir () {
+	for ( const auto& store : trustStores() ) {
+		std::error_code ec;
+		if ( !std::filesystem::exists(store, ec) )
+			continue;
+		return std::filesystem::is_directory(store, ec) ? store : std::filesystem::path{};
+	}
+	return "trusted-certs";
+}
+
 Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_unique<char[]>(bufferSize)), _bufferSize(bufferSize) {
 	_ctx = SSL_CTX_new(OSSL_QUIC_client_method());
 	if ( _ctx == nullptr ) {

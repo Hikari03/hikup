@@ -9,6 +9,7 @@
 #include <memory>
 #include <thread>
 #include <functional>
+#include <filesystem>
 #include <openssl/bio.h>
 #include <openssl/types.h>
 
@@ -81,6 +82,12 @@ public:
 	// true when the loaded trust anchors came from the working directory
 	// (the last-resort store) — clients warn about it when verifying
 	bool trustStoreFromWorkingDir () const;
+
+	// directory an automatically pinned trust anchor should be written to
+	// so that the next Connection constructed actually loads it (the store
+	// that wins the candidate chain); empty when that store is a single
+	// certificate file that must not be modified automatically
+	static std::filesystem::path pinnableTrustStoreDir ();
 
 	void resizeBuffer ( unsigned long newSize );
 
