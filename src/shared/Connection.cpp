@@ -134,20 +134,29 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 		throw std::runtime_error("Failed to create the SSL_CTX");
 	}
 
-	// The OS default trust paths load only without an override:
-	// HIKUP_TRUSTED_CERTS pins trust exclusively, so a publicly trusted
-	// certificate must not verify alongside (or instead of) that store.
-	if ( trustedCertsOverride() == nullptr )
-		SSL_CTX_set_default_verify_paths(_ctx);
+	// A throw from the trust-store loading (a broken anchor, a bad
+	// HIKUP_TRUSTED_CERTS) must not leak the context: the destructor does
+	// not run for a failed construction.
+	try {
+		// The OS default trust paths load only without an override:
+		// HIKUP_TRUSTED_CERTS pins trust exclusively, so a publicly trusted
+		// certificate must not verify alongside (or instead of) that store.
+		if ( trustedCertsOverride() == nullptr )
+			SSL_CTX_set_default_verify_paths(_ctx);
 
-	for ( const auto& store : trustStores() ) {
-		std::error_code ec;
-		if ( !std::filesystem::exists(store, ec) )
-			continue;
+		for ( const auto& store : trustStores() ) {
+			std::error_code ec;
+			if ( !std::filesystem::exists(store, ec) )
+				continue;
 
-		_trustStoreFromWorkingDir = store == "trusted-certs";
-		loadTrustStore(_ctx, store);
-		break;   // first existing store wins
+			_trustStoreFromWorkingDir = store == "trusted-certs";
+			loadTrustStore(_ctx, store);
+			break;   // first existing store wins
+		}
+	} catch ( ... ) {
+		SSL_CTX_free(_ctx);
+		_ctx = nullptr;
+		throw;
 	}
 
 	memset(_buffer.get(), '\0', _bufferSize);
@@ -278,6 +287,7 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 	}
 
 	SSL_set_bio(_ssl, _bio, _bio);
+	_bio = nullptr;   // the SSL owns it from here; close() frees it via SSL_free
 
 	/* Do the handshake with the server */
 	if ( const auto ret = SSL_connect(_ssl); ret < 1) {
@@ -689,8 +699,25 @@ void Connection::resizeBuffer ( const unsigned long newSize )  {
 }
 
 void Connection::close () {
-	SSL_shutdown(_ssl);
-	SSL_CTX_free(_ctx);
+	// Idempotent and safe on a never-connected or partially connected
+	// object: the members start null (and are nulled again here), so a
+	// connectToServer() that threw early can never make this touch a
+	// garbage or already-freed pointer. SSL_free also releases the BIOs
+	// the SSL owns via SSL_set_bio; a BIO created but never handed over
+	// is freed directly.
+	if ( _ssl != nullptr ) {
+		SSL_shutdown(_ssl);
+		SSL_free(_ssl);
+		_ssl = nullptr;
+	}
+	if ( _bio != nullptr ) {
+		BIO_free_all(_bio);
+		_bio = nullptr;
+	}
+	if ( _ctx != nullptr ) {
+		SSL_CTX_free(_ctx);
+		_ctx = nullptr;
+	}
 
 	_active = false;
 }

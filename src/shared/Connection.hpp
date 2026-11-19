@@ -105,9 +105,9 @@ private:
 	std::vector<std::string> _messagesBuffer;
 	unsigned long _bufferSize = 4*1024*1024;
 	std::mutex _sendMutex;
-	SSL_CTX *_ctx;
-	SSL *_ssl;
-	BIO *_bio;
+	SSL_CTX *_ctx = nullptr;
+	SSL *_ssl = nullptr;
+	BIO *_bio = nullptr;
 
 	size_t _sizeOfPreviousMessage = 0;
 	bool _active = true;
