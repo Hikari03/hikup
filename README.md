@@ -75,7 +75,7 @@ cmake --build build --target hikup -j $(nproc)
 - Expected name for chain certificate is `server_fullchain.pem` and for private key `server_key.pem`.
 - When no certificate or key is present, server will generate its own CA and certificate.
 - If this happens, the hostname declared in settings will be used. You will also need to add the `ca_cert.pem` as your trusted CA.
-- Client trust anchors are searched in this order, first existing wins: `$HIKUP_TRUSTED_CERTS` (a file or directory), `~/.config/hikup/trusted-certs`, `/usr/share/hikup/trusted-certs` (created by `make install`), and finally `./trusted-certs` — which prints a warning when verifying (`v` commands), since a trust store that depends on the working directory is easy to plant. A certificate that fails to load aborts the connection instead of being silently skipped.
+- Client trust anchors are searched in this order, first existing wins: `$HIKUP_TRUSTED_CERTS` (a file or directory), `~/.config/hikup/trusted-certs`, `trusted-certs` under the configured data dir (created by `make install` — `/usr/local/share/hikup/trusted-certs` for the default prefix, `/usr/share/hikup/trusted-certs` with `-DCMAKE_INSTALL_PREFIX=/usr`), and finally `./trusted-certs` — which prints a warning when verifying (`v` commands), since a trust store that depends on the working directory is easy to plant. A certificate that fails to load aborts the connection instead of being silently skipped.
 
 ### Sync
 - Sync files between servers in declared periods.

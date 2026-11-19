@@ -117,13 +117,19 @@ include(GNUInstallDirs)
 install(TARGETS hikup hikup-server
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-install(FILES hikup-completion.bash
+# shared data root (created by the install rule below, owned by the
+# installing user): the saved-servers list and the system-wide trust store.
+# The binaries and the completion script resolve it at runtime, so the same
+# value must be baked into both.
+set(HIKUP_DATA_DIR "${CMAKE_INSTALL_FULL_DATADIR}/hikup")
+
+target_compile_definitions(hikup PRIVATE HIKUP_DATA_DIR="${HIKUP_DATA_DIR}")
+target_compile_definitions(hikup-server PRIVATE HIKUP_DATA_DIR="${HIKUP_DATA_DIR}")
+
+configure_file(hikup-completion.bash hikup-completion.bash @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/hikup-completion.bash
         DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
         RENAME hikup)
-
-# shared data root (created by the install rule below, owned by the
-# installing user): the saved-servers list and the system-wide trust store
-set(HIKUP_DATA_DIR "${CMAKE_INSTALL_FULL_DATADIR}/hikup")
 
 install(CODE "
     execute_process(COMMAND id -un OUTPUT_VARIABLE CURRENT_USER OUTPUT_STRIP_TRAILING_WHITESPACE)

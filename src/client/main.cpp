@@ -13,6 +13,11 @@
 #include "Style.hpp"
 #include "../shared/Connection.hpp"
 
+#ifndef HIKUP_DATA_DIR
+// fallback when built outside CMake; matches the /usr install prefix
+#define HIKUP_DATA_DIR "/usr/share/hikup"
+#endif
+
 using namespace ui;
 
 namespace {
@@ -65,7 +70,7 @@ Endpoint parseEndpoint ( std::string s ) {
 void saveServer ( const std::string& server ) {
     if ( server.empty() ) return;
     try {
-        std::filesystem::path targetFile = "/usr/share/hikup";
+        std::filesystem::path targetFile = HIKUP_DATA_DIR;
         if ( std::filesystem::exists(targetFile) && std::filesystem::is_directory(targetFile) ) {
             targetFile /= "servers";
         }

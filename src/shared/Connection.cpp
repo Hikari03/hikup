@@ -8,17 +8,29 @@
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 
+#ifndef HIKUP_DATA_DIR
+// fallback when built outside CMake; matches the /usr install prefix
+#define HIKUP_DATA_DIR "/usr/share/hikup"
+#endif
+
 namespace {
+
+// the HIKUP_TRUSTED_CERTS override: when set to a non-empty value, trust is
+// pinned to that one store and nothing else
+const char* trustedCertsOverride () {
+	const char* env = std::getenv("HIKUP_TRUSTED_CERTS");
+	return env != nullptr && *env != '\0' ? env : nullptr;
+}
 
 // candidate trust stores, in order — first existing one wins, so a fixed
 // location always beats a planted trusted-certs/ in whatever directory the
 // client happens to run from
 std::vector<std::filesystem::path> trustStores () {
-	if ( const char* env = std::getenv("HIKUP_TRUSTED_CERTS"); env != nullptr && *env != '\0' ) {
+	if ( const char* env = trustedCertsOverride(); env != nullptr ) {
 		const auto p = std::filesystem::path(env);
 		if ( !std::filesystem::exists(p) )
 			throw std::runtime_error("HIKUP_TRUSTED_CERTS does not exist: " + std::string(env));
-		return {p};   // an explicit override is the only store considered
+		return {p};   // the override is the only trust source, OS roots included
 	}
 
 	std::vector<std::filesystem::path> stores;
@@ -32,8 +44,9 @@ std::vector<std::filesystem::path> trustStores () {
 	if ( !configHome.empty() )
 		stores.emplace_back(configHome + "/hikup/trusted-certs");
 
-	// system-wide, matching the saved-servers file convention
-	stores.emplace_back("/usr/share/hikup/trusted-certs");
+	// system-wide: the data dir configured at build time, so it always
+	// matches the directory `make install` creates
+	stores.emplace_back(HIKUP_DATA_DIR "/trusted-certs");
 
 	// last resort: the working directory (the server's fixed root, or a
 	// client run deliberately from its trust dir)
@@ -67,7 +80,11 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 		throw std::runtime_error("Failed to create the SSL_CTX");
 	}
 
-	SSL_CTX_set_default_verify_paths(_ctx);
+	// The OS default trust paths load only without an override:
+	// HIKUP_TRUSTED_CERTS pins trust exclusively, so a publicly trusted
+	// certificate must not verify alongside (or instead of) that store.
+	if ( trustedCertsOverride() == nullptr )
+		SSL_CTX_set_default_verify_paths(_ctx);
 
 	for ( const auto& store : trustStores() ) {
 		std::error_code ec;
