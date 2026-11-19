@@ -190,9 +190,18 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 	SSL_set_verify(_ssl, forceServerCertVerify ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, nullptr);
 
 	if ( forceServerCertVerify ) {
+#if OPENSSL_VERSION_MAJOR > 3
+		/* OpenSSL 4.0 deprecated SSL_set1_host() and split it into IP and DNS
+		 * variants. The peer can be either, so try the IP form first and fall
+		 * back to a DNS name when the address is not an IP literal. */
+		if ( !SSL_set1_ipaddr(_ssl, ip.c_str()) && !SSL_set1_dnsname(_ssl, ip.c_str()) ) {
+			throw std::runtime_error("Failed to set expected hostname for certificate verification");
+		}
+#else
 		if ( !SSL_set1_host(_ssl, ip.c_str()) ) {
 			throw std::runtime_error("Failed to set expected hostname for certificate verification");
 		}
+#endif
 	}
 
 	SSL_set_bio(_ssl, _bio, _bio);

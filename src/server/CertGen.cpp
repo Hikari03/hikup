@@ -44,9 +44,14 @@ void CertGen::setRandomSerial ( X509* crt ) {
 
 // ---- 3. Subject == issuer, because a root is self-signed --------------------
 void CertGen::setName ( X509* crt, const char* country, const char* org, const char* cn ) {
-	X509_NAME* name = X509_get_subject_name(crt);
+	// OpenSSL 4.0 made X509_get_subject_name() return a const name, so build
+	// a fresh one and copy it in — X509_set_*_name() duplicate what we pass.
+	const X509NamePtr name(X509_NAME_new());
+	if ( !name )
+		fail("X509_NAME_new failed");
+
 	auto add = [&] ( const char* field, const char* value ) {
-		if ( !X509_NAME_add_entry_by_txt(name, field, MBSTRING_ASC, reinterpret_cast<const unsigned char*>(value), -1,
+		if ( !X509_NAME_add_entry_by_txt(name.get(), field, MBSTRING_ASC, reinterpret_cast<const unsigned char*>(value), -1,
 		                                 -1, 0) )
 			fail(std::string("setting ") + field + " failed");
 	};
@@ -54,7 +59,10 @@ void CertGen::setName ( X509* crt, const char* country, const char* org, const c
 	add("O", org);
 	add("CN", cn);
 
-	if ( !X509_set_issuer_name(crt, name) )
+	if ( !X509_set_subject_name(crt, name.get()) )
+		fail("setting subject failed");
+
+	if ( !X509_set_issuer_name(crt, name.get()) )
 		fail("setting issuer failed");
 }
 
@@ -188,9 +196,14 @@ X509Ptr CertGen::makeServerCertificate (
 	setRandomSerial(crt.get());
 
 	// Subject = the server, NOT the CA.
-	X509_NAME* name = X509_get_subject_name(crt.get());
+	// OpenSSL 4.0 made X509_get_subject_name() return a const name, so build
+	// a fresh one and copy it in with X509_set_subject_name().
+	const X509NamePtr name(X509_NAME_new());
+	if ( !name )
+		fail("X509_NAME_new failed");
+
 	auto add = [&] ( const char* field, const char* value ) {
-		if ( !X509_NAME_add_entry_by_txt(name, field, MBSTRING_ASC,
+		if ( !X509_NAME_add_entry_by_txt(name.get(), field, MBSTRING_ASC,
 		                                 reinterpret_cast<const unsigned char*>(value), -1, -1, 0) )
 			fail(std::string("setting ") + field + " failed");
 	};
@@ -198,7 +211,10 @@ X509Ptr CertGen::makeServerCertificate (
 	add("O", org);
 	add("CN", common_name);
 
-	// Issuer = the CA's subject.
+	if ( !X509_set_subject_name(crt.get(), name.get()) )
+		fail("setting subject failed");
+
+	// Issuer = the CA's subject (const is fine, the setter copies it).
 	if ( !X509_set_issuer_name(crt.get(), X509_get_subject_name(ca_crt)) )
 		fail("setting issuer failed");
 
