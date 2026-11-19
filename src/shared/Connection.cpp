@@ -3,11 +3,17 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
-#include <unistd.h>
 #include <vector>
 #include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
+
+// same platform split as Connection.hpp: <unistd.h> is POSIX-only
+#if defined(_WIN32)
+#include <io.h>      // _access
+#else
+#include <unistd.h>  // access
+#endif
 
 #ifndef HIKUP_DATA_DIR
 // fallback when built outside CMake; matches the /usr install prefix
@@ -58,7 +64,11 @@ std::vector<std::filesystem::path> trustStores () {
 
 // true when the running user may create files in this directory
 bool dirWritable ( const std::filesystem::path& dir ) {
+#if defined(_WIN32)
+	return _access(dir.string().c_str(), 02) == 0;   // 02 = write mode
+#else
 	return ::access(dir.c_str(), W_OK) == 0;
+#endif
 }
 
 // loads one trust store: a single certificate file or a directory of them.

@@ -988,9 +988,11 @@ std::filesystem::path ConnectionHandler::_pinSyncTargetCert ( const std::string&
 
 	// write to a sibling temp file and hard-link it into place — a full disk
 	// must never leave a truncated trust anchor behind, and link() refuses
-	// to replace a pin another process may have created since the check
+	// to replace a pin another process may have created since the check.
+	// The temp name is unique per process: two writers must never
+	// interleave writes to the same temp before the no-replace install.
 	auto tmp = target;
-	tmp += ".new";
+	tmp += "." + std::to_string(::getpid()) + ".new";
 	{
 		std::ofstream out(tmp, std::ios::trunc);
 		if ( !out ) {

@@ -552,9 +552,11 @@ int CommandHandlers::fetchCert ( Connection& connection, const std::string& host
     }
 
     // write to a sibling temp file and rename it into place: a full disk or
-    // quota error must never leave a truncated trust anchor behind
+    // quota error must never leave a truncated trust anchor behind. The
+    // temp name is unique per process so concurrent writers never
+    // interleave writes to the same file before the no-replace install.
     auto tmp = target;
-    tmp += ".new";
+    tmp += "." + std::to_string(::getpid()) + ".new";
     {
         std::ofstream out(tmp, std::ios::trunc);
         if ( !out ) {
