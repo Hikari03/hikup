@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <unistd.h>
 #include <vector>
 #include <openssl/err.h>
 #include <openssl/pem.h>
@@ -55,6 +56,11 @@ std::vector<std::filesystem::path> trustStores () {
 	return stores;
 }
 
+// true when the running user may create files in this directory
+bool dirWritable ( const std::filesystem::path& dir ) {
+	return ::access(dir.c_str(), W_OK) == 0;
+}
+
 // loads one trust store: a single certificate file or a directory of them.
 // A file that fails to parse throws — a broken trust anchor must never mean
 // "verify anyway"
@@ -66,27 +72,50 @@ void loadTrustStore ( SSL_CTX* ctx, const std::filesystem::path& p ) {
 		return;
 	}
 
-	for ( const auto& cert : std::filesystem::directory_iterator(p) ) {
-		if ( !SSL_CTX_load_verify_locations(ctx, cert.path().c_str(), nullptr) )
-			throw std::runtime_error("could not load certificate: " + cert.path().string());
+	for ( const auto& entry : std::filesystem::directory_iterator(p) ) {
+		// skip the atomic writers' temp files (".new") and hidden entries —
+		// a stale or in-flight temp must not break (or sneak into) the store;
+		// anything else must parse or the store is broken
+		const auto file = entry.path().filename().string();
+		const auto isTemp = file.size() >= 4 && file.compare(file.size() - 4, 4, ".new") == 0;
+		const auto isHidden = !file.empty() && file.front() == '.';
+		if ( isTemp || isHidden )
+			continue;
+
+		if ( !SSL_CTX_load_verify_locations(ctx, entry.path().c_str(), nullptr) )
+			throw std::runtime_error("could not load certificate: " + entry.path().string());
 	}
+
 }
 
 } // namespace
 
 // where an automatically pinned anchor belongs so the next Connection
-// constructed here loads it: the store that wins the candidate chain.
-// Empty when that store is a single certificate file (never modified
-// automatically). When no store exists at all, the working-directory one
-// is next in line, so pinning there also makes it the winner.
+// constructed here loads it: the store that wins the candidate chain, and
+// only when this process can actually write to it — pinning into any other
+// store would never be read. Empty when that store is a single certificate
+// file or not writable (e.g. a root-owned system store). When no store
+// exists at all, the working-directory one is next in line, so pinning
+// there also makes it the winner.
 std::filesystem::path Connection::pinnableTrustStoreDir () {
 	for ( const auto& store : trustStores() ) {
 		std::error_code ec;
 		if ( !std::filesystem::exists(store, ec) )
 			continue;
-		return std::filesystem::is_directory(store, ec) ? store : std::filesystem::path{};
+		if ( !std::filesystem::is_directory(store, ec) )
+			return {};   // a single certificate file must not be modified
+		if ( !dirWritable(store) )
+			return {};   // not writable — automatic pinning cannot work here
+		return store;
 	}
-	return "trusted-certs";
+
+	if ( dirWritable(".") )
+		return "trusted-certs";
+	return {};
+}
+
+long Connection::lastVerifyResult () const {
+	return _lastVerifyResult;
 }
 
 Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_unique<char[]>(bufferSize)), _bufferSize(bufferSize) {
@@ -116,6 +145,8 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 
 void Connection::connectToServer ( std::string ip, const int port, const bool forceServerCertVerify ) {
 	// implementation heavily inspired by https://github.com/openssl/openssl/blob/master/demos/guide/quic-client-block.c#L30
+
+	_lastVerifyResult = X509_V_OK;   // filled in once the handshake ran
 
 	int sock = -1;
 	BIO_ADDRINFO *res;
@@ -240,6 +271,7 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 
 	/* Do the handshake with the server */
 	if ( const auto ret = SSL_connect(_ssl); ret < 1) {
+		_lastVerifyResult = SSL_get_verify_result(_ssl);
 		std::string retStr;
 		switch ( const auto err = SSL_get_error(_ssl, ret) ) {
 			case SSL_ERROR_ZERO_RETURN:
@@ -279,10 +311,13 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 		 * If the failure is due to a verification error we can get more
 		 * information about it from SSL_get_verify_result().
 		 */
-		if ( SSL_get_verify_result(_ssl) != X509_V_OK )
-			throw std::runtime_error("Certificate verify error: " + std::string(X509_verify_cert_error_string(SSL_get_verify_result(_ssl))));
+		if ( _lastVerifyResult != X509_V_OK )
+			throw std::runtime_error("Certificate verify error: "
+				+ std::string(X509_verify_cert_error_string(_lastVerifyResult)));
 		throw std::runtime_error("Failed to connect to the server: " + retStr);
 	}
+
+	_lastVerifyResult = SSL_get_verify_result(_ssl);
 }
 
 void Connection::_send ( const char* message, const size_t length ) {

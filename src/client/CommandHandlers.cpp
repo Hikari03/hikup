@@ -1,10 +1,12 @@
 #include "CommandHandlers.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -568,12 +570,22 @@ int CommandHandlers::fetchCert ( Connection& connection, const std::string& host
             return 1;
         }
     }
-    std::filesystem::rename(tmp, target, ec);
-    if ( ec ) {
+    // install without replacing: a concurrent writer (another fetch-cert, a
+    // server's sync pinning) may have created the pin since the check
+    // above, and POSIX rename would silently clobber it — link() refuses
+    if ( link(tmp.c_str(), target.c_str()) != 0 ) {
         std::error_code rm;
         std::filesystem::remove(tmp, rm);
-        ui::fail("could not move " + tmp.string() + " into place: " + ec.message());
+        if ( errno == EEXIST ) {
+            ui::fail("a certificate for " + name + " was pinned concurrently; run again to compare it");
+            return 1;
+        }
+        ui::fail(std::string("could not install ") + tmp.string() + ": " + std::strerror(errno));
         return 1;
+    }
+    {
+        std::error_code rm;
+        std::filesystem::remove(tmp, rm);
     }
     std::filesystem::permissions(target,
         std::filesystem::perms::owner_read | std::filesystem::perms::owner_write

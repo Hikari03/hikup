@@ -81,7 +81,7 @@ cmake --build build --target hikup -j $(nproc)
 - Sync files between servers in declared periods.
 - To use this, add target in settings in `[syncTargets]` section.
 - If certificate verify is desired and custom CA certificate was used, place it into `trusted-certs/` directory.
-- Targets with `tlsCertVerify = true` that are not yet anchored are pinned automatically on first contact (trust on first use): the sync connects once unverified, stores the certificate the target presents as `trusted-certs/<host>[-<port>].pem`, then reconnects and verifies against it. A pinned certificate is never replaced automatically — if the target later presents a different one, the sync fails until the old pin is deleted manually. 
+- Targets with `tlsCertVerify = true` that are not yet anchored are pinned automatically on first contact (trust on first use): the sync connects once unverified, stores the certificate the target presents as `trusted-certs/<host>[-<port>].pem`, then reconnects and verifies against it. Only a missing trust anchor triggers pinning — other verification failures (expired certificate, hostname mismatch) are reported as errors and never pinned, and a pin that turns out not to fix the failure is rolled back. A pinned certificate is never replaced automatically — if the target later presents a different one, the sync fails until the old pin is deleted manually. 
 
 > [!WARNING]
 >**The declared target will be the master in one case**: if you uploaded a removed file and that removal synced. Which means if you again upload this file on non-master, your master will remove it on the next sync.

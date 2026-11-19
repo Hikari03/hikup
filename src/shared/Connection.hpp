@@ -83,10 +83,16 @@ public:
 	// (the last-resort store) — clients warn about it when verifying
 	bool trustStoreFromWorkingDir () const;
 
+	// the X509 verify result of the last handshake attempt (X509_V_OK when
+	// it succeeded or never ran) — lets callers tell a missing trust anchor
+	// apart from other verification failures
+	long lastVerifyResult () const;
+
 	// directory an automatically pinned trust anchor should be written to
 	// so that the next Connection constructed actually loads it (the store
 	// that wins the candidate chain); empty when that store is a single
-	// certificate file that must not be modified automatically
+	// certificate file or not writable by this user — a pin anywhere else
+	// would never be read, so automatic pinning cannot work then
 	static std::filesystem::path pinnableTrustStoreDir ();
 
 	void resizeBuffer ( unsigned long newSize );
@@ -107,6 +113,7 @@ private:
 	bool _active = true;
 	bool _moreInBuffer = false;
 	bool _trustStoreFromWorkingDir = false;
+	long _lastVerifyResult = 0;   // X509_V_OK
 
 	void clearBuffer () const;
 
