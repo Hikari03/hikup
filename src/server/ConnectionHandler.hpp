@@ -69,6 +69,7 @@ private:
 
     void _syncAsSlave ( ConnectionServer& connection );
     void _syncAsMaster ( const Settings::SyncTarget& target );
+    [[nodiscard]] std::filesystem::path _pinSyncTargetCert ( const std::string& address, int port );
     void _syncer ();
 
     template < SetOrVectorOfString T >

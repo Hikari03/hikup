@@ -1,17 +1,24 @@
 #include "CommandHandlers.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <sys/ioctl.h>   // Windows: GetConsoleScreenBufferInfo
 #include <unistd.h>      // isatty (Windows: <io.h>, _isatty/_fileno)
 #include <vector>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 
 #include "Color.hpp"     // drop if nothing else in this file uses colorize()
 #include "E2E.hpp"
@@ -398,6 +405,206 @@ int CommandHandlers::fetchUrl ( Connection& connection, const bool quiet ) {
                       { "hash", hash,                               ui::AERO_SKY },
                       { "link", httpExists ? httpLink : "not available",
                               httpExists ? ui::LUMINOUS_GLASS : ui::FROSTED_STEEL },
+                  });
+    return 0;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+namespace {
+    // "Nov  4 12:00:00 2026 GMT" — good enough for the summary tree
+    std::string asn1TimeString ( const ASN1_TIME* t ) {
+        const auto bio = BIO_new(BIO_s_mem());
+        if ( bio == nullptr )
+            return {};
+
+        ASN1_TIME_print(bio, t);
+
+        char* data = nullptr;
+        const auto len = BIO_get_mem_data(bio, &data);
+        std::string out(data, len);
+        BIO_free(bio);
+        return out;
+    }
+
+    // one-line RFC 2253 name ("CN=...,O=...") — X509_NAME_oneline() is
+    // deprecated since OpenSSL 3 and this project builds with -Werror
+    std::string nameToString ( const X509_NAME* n ) {
+        const auto bio = BIO_new(BIO_s_mem());
+        if ( bio == nullptr )
+            return {};
+
+        X509_NAME_print_ex(bio, n, 0, XN_FLAG_RFC2253);
+
+        char* data = nullptr;
+        const auto len = BIO_get_mem_data(bio, &data);
+        std::string out(data, len);
+        BIO_free(bio);
+        return out;
+    }
+
+    // parse the first certificate of a PEM string
+    std::unique_ptr<X509, decltype(&X509_free)> parsePemCertificate ( const std::string& pem ) {
+        const auto memBio = BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size()));
+        std::unique_ptr<X509, decltype(&X509_free)> cert(
+            memBio != nullptr ? PEM_read_bio_X509(memBio, nullptr, nullptr, nullptr) : nullptr, &X509_free);
+        BIO_free(memBio);
+        return cert;
+    }
+
+    // sha-256 fingerprint of a parsed certificate
+    std::string certFingerprint ( const X509* cert ) {
+        unsigned char md[EVP_MAX_MD_SIZE] = {0};
+        unsigned int mdLen = 0;
+        X509_digest(cert, EVP_sha256(), md, &mdLen);
+        return bytesToHex(md, mdLen);
+    }
+}
+
+int CommandHandlers::fetchCert ( Connection& connection, const std::string& host, const int port, const bool quiet ) {
+    const auto pem = connection.peerCertificatePem();
+    if ( pem.empty() ) {
+        ui::fail("the server did not present a certificate");
+        return 1;
+    }
+
+    // parse it back for the summary the user should compare out of band
+    const auto cert = parsePemCertificate(pem);
+    if ( cert == nullptr ) {
+        ui::fail("could not parse the certificate the server presented");
+        return 1;
+    }
+
+    const auto subject = nameToString(X509_get_subject_name(cert.get()));
+    const auto issuer  = nameToString(X509_get_issuer_name(cert.get()));
+    const auto fingerprint = certFingerprint(cert.get());
+
+    const auto valid = asn1TimeString(X509_get0_notBefore(cert.get())) + " — "
+                     + asn1TimeString(X509_get0_notAfter(cert.get()));
+
+    // an override pins trust to one explicit store — writing into the
+    // per-user directory it ignores would report success while no `v`
+    // command ever uses this certificate
+    if ( const char* env = std::getenv("HIKUP_TRUSTED_CERTS"); env != nullptr && *env != '\0' ) {
+        ui::fail(std::string("HIKUP_TRUSTED_CERTS is set (") + env
+                 + ") — place the certificate there manually");
+        return 1;
+    }
+
+    // the per-user trust store: ~/.config/hikup/trusted-certs
+    std::filesystem::path configHome;
+    if ( const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0' )
+        configHome = xdg;
+    else if ( const char* home = std::getenv("HOME"); home != nullptr && *home != '\0' )
+        configHome = std::filesystem::path(home) / ".config";
+    else {
+        ui::fail("could not determine the config directory (HOME is unset)");
+        return 1;
+    }
+
+    const auto dir = configHome / "hikup" / "trusted-certs";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if ( ec ) {
+        ui::fail("could not create " + dir.string() + ": " + ec.message());
+        return 1;
+    }
+
+    auto name = host;
+    if ( port != 6998 )
+        name += "-" + std::to_string(port);   // keep servers on one host apart
+    const auto target = dir / (name + ".pem");
+
+    // changed-key protection: never silently replace a pinned anchor — a
+    // MITM or a server with a re-issued certificate must not become
+    // trusted as a side effect of fetching
+    if ( std::filesystem::exists(target, ec) ) {
+        std::string oldPem;
+        if ( std::ifstream in(target, std::ios::binary); in )
+            oldPem.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+
+        const auto oldCert = parsePemCertificate(oldPem);
+        const auto oldFingerprint = oldCert != nullptr ? certFingerprint(oldCert.get()) : std::string();
+        if ( oldFingerprint.empty() ) {
+            ui::fail("could not read the stored certificate " + target.string());
+            return 1;
+        }
+        if ( oldFingerprint != fingerprint ) {
+            ui::fail("a different certificate is already pinned for " + name
+                     + " (stored sha256 " + oldFingerprint + "); delete " + target.string()
+                     + " first if you really want to replace it");
+            return 1;
+        }
+
+        if ( quiet ) {
+            std::cout << "cert: " << target.string() << '\n'
+                      << "sha256: " << fingerprint << '\n';
+            return 0;
+        }
+
+        ui::printTree(ui::tag("+", ui::AQUA_GLASS) + " " + ui::paint("certificate already pinned", ui::BOLD), {
+                          { "subject", subject,        ui::ICE_WHITE },
+                          { "issuer",  issuer,         ui::FROSTED_STEEL },
+                          { "valid",   valid,          ui::FROSTED_STEEL },
+                          { "sha256",  fingerprint,    ui::AERO_SKY },
+                          { "path",    target.string(), ui::LUMINOUS_GLASS },
+                      });
+        return 0;
+    }
+
+    // write to a sibling temp file and rename it into place: a full disk or
+    // quota error must never leave a truncated trust anchor behind. The
+    // temp name is unique per process so concurrent writers never
+    // interleave writes to the same file before the no-replace install.
+    auto tmp = target;
+    tmp += "." + std::to_string(::getpid()) + ".new";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        if ( !out ) {
+            ui::fail("could not write " + tmp.string());
+            return 1;
+        }
+        out << pem;
+        out.close();
+        if ( !out ) {
+            std::error_code rm;
+            std::filesystem::remove(tmp, rm);
+            ui::fail("could not write " + tmp.string() + " completely");
+            return 1;
+        }
+    }
+    // install without replacing: a concurrent writer (another fetch-cert, a
+    // server's sync pinning) may have created the pin since the check
+    // above, and POSIX rename would silently clobber it — link() refuses
+    if ( link(tmp.c_str(), target.c_str()) != 0 ) {
+        std::error_code rm;
+        std::filesystem::remove(tmp, rm);
+        if ( errno == EEXIST ) {
+            ui::fail("a certificate for " + name + " was pinned concurrently; run again to compare it");
+            return 1;
+        }
+        ui::fail(std::string("could not install ") + tmp.string() + ": " + std::strerror(errno));
+        return 1;
+    }
+    {
+        std::error_code rm;
+        std::filesystem::remove(tmp, rm);
+    }
+    std::filesystem::permissions(target,
+        std::filesystem::perms::owner_read | std::filesystem::perms::owner_write
+      | std::filesystem::perms::group_read | std::filesystem::perms::others_read, ec);
+
+    if ( quiet ) {
+        std::cout << "cert: " << target.string() << '\n'
+                  << "sha256: " << fingerprint << '\n';
+        return 0;
+    }
+
+    ui::printTree(ui::tag("+", ui::AQUA_GLASS) + " " + ui::paint("certificate chain stored", ui::BOLD), {
+                      { "subject", subject,      ui::ICE_WHITE },
+                      { "issuer",  issuer,       ui::FROSTED_STEEL },
+                      { "valid",   valid,         ui::FROSTED_STEEL },
+                      { "sha256",  fingerprint,   ui::AERO_SKY },
+                      { "path",    target.string(), ui::LUMINOUS_GLASS },
                   });
     return 0;
 }

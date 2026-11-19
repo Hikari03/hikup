@@ -12,6 +12,7 @@ namespace Command {
 		LIST,
 		INFO,
 		FETCH,
+		FETCH_CERT,
 		BATCH,
 		QUIET,
 		SSL_VERIFY_CERT,

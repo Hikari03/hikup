@@ -9,6 +9,7 @@
 #include <memory>
 #include <thread>
 #include <functional>
+#include <filesystem>
 #include <openssl/bio.h>
 #include <openssl/types.h>
 
@@ -74,6 +75,26 @@ public:
 
 	bool isConnected () const;
 
+	// the server's certificate chain in PEM form (leaf + issuers), empty
+	// when none was presented (after the handshake — used by fetch-cert)
+	std::string peerCertificatePem () const;
+
+	// true when the loaded trust anchors came from the working directory
+	// (the last-resort store) — clients warn about it when verifying
+	bool trustStoreFromWorkingDir () const;
+
+	// the X509 verify result of the last handshake attempt (X509_V_OK when
+	// it succeeded or never ran) — lets callers tell a missing trust anchor
+	// apart from other verification failures
+	long lastVerifyResult () const;
+
+	// directory an automatically pinned trust anchor should be written to
+	// so that the next Connection constructed actually loads it (the store
+	// that wins the candidate chain); empty when that store is a single
+	// certificate file or not writable by this user — a pin anywhere else
+	// would never be read, so automatic pinning cannot work then
+	static std::filesystem::path pinnableTrustStoreDir ();
+
 	void resizeBuffer ( unsigned long newSize );
 
 	void close ();
@@ -84,13 +105,15 @@ private:
 	std::vector<std::string> _messagesBuffer;
 	unsigned long _bufferSize = 4*1024*1024;
 	std::mutex _sendMutex;
-	SSL_CTX *_ctx;
-	SSL *_ssl;
-	BIO *_bio;
+	SSL_CTX *_ctx = nullptr;
+	SSL *_ssl = nullptr;
+	BIO *_bio = nullptr;
 
 	size_t _sizeOfPreviousMessage = 0;
 	bool _active = true;
 	bool _moreInBuffer = false;
+	bool _trustStoreFromWorkingDir = false;
+	long _lastVerifyResult = 0;   // X509_V_OK
 
 	void clearBuffer () const;
 

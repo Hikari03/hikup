@@ -1,9 +1,132 @@
 #include "Connection.hpp"
 
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <vector>
 #include <openssl/err.h>
+#include <openssl/pem.h>
 #include <openssl/ssl.h>
+
+// same platform split as Connection.hpp: <unistd.h> is POSIX-only
+#if defined(_WIN32)
+#include <io.h>      // _access
+#else
+#include <unistd.h>  // access
+#endif
+
+#ifndef HIKUP_DATA_DIR
+// fallback when built outside CMake; matches the /usr install prefix
+#define HIKUP_DATA_DIR "/usr/share/hikup"
+#endif
+
+namespace {
+
+// the HIKUP_TRUSTED_CERTS override: when set to a non-empty value, trust is
+// pinned to that one store and nothing else
+const char* trustedCertsOverride () {
+	const char* env = std::getenv("HIKUP_TRUSTED_CERTS");
+	return env != nullptr && *env != '\0' ? env : nullptr;
+}
+
+// candidate trust stores, in order — first existing one wins, so a fixed
+// location always beats a planted trusted-certs/ in whatever directory the
+// client happens to run from
+std::vector<std::filesystem::path> trustStores () {
+	if ( const char* env = trustedCertsOverride(); env != nullptr ) {
+		const auto p = std::filesystem::path(env);
+		if ( !std::filesystem::exists(p) )
+			throw std::runtime_error("HIKUP_TRUSTED_CERTS does not exist: " + std::string(env));
+		return {p};   // the override is the only trust source, OS roots included
+	}
+
+	std::vector<std::filesystem::path> stores;
+
+	// per-user: XDG_CONFIG_HOME (default ~/.config)/hikup/trusted-certs
+	std::string configHome;
+	if ( const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0' )
+		configHome = xdg;
+	else if ( const char* home = std::getenv("HOME"); home != nullptr && *home != '\0' )
+		configHome = std::string(home) + "/.config";
+	if ( !configHome.empty() )
+		stores.emplace_back(configHome + "/hikup/trusted-certs");
+
+	// system-wide: the data dir configured at build time, so it always
+	// matches the directory `make install` creates
+	stores.emplace_back(HIKUP_DATA_DIR "/trusted-certs");
+
+	// last resort: the working directory (the server's fixed root, or a
+	// client run deliberately from its trust dir)
+	stores.emplace_back("trusted-certs");
+
+	return stores;
+}
+
+// true when the running user may create files in this directory
+bool dirWritable ( const std::filesystem::path& dir ) {
+#if defined(_WIN32)
+	return _access(dir.string().c_str(), 02) == 0;   // 02 = write mode
+#else
+	return ::access(dir.c_str(), W_OK) == 0;
+#endif
+}
+
+// loads one trust store: a single certificate file or a directory of them.
+// A file that fails to parse throws — a broken trust anchor must never mean
+// "verify anyway"
+void loadTrustStore ( SSL_CTX* ctx, const std::filesystem::path& p ) {
+	std::error_code ec;
+	if ( std::filesystem::is_regular_file(p, ec) ) {
+		if ( !SSL_CTX_load_verify_locations(ctx, p.c_str(), nullptr) )
+			throw std::runtime_error("could not load certificate: " + p.string());
+		return;
+	}
+
+	for ( const auto& entry : std::filesystem::directory_iterator(p) ) {
+		// skip the atomic writers' temp files (".new") and hidden entries —
+		// a stale or in-flight temp must not break (or sneak into) the store;
+		// anything else must parse or the store is broken
+		const auto file = entry.path().filename().string();
+		const auto isTemp = file.size() >= 4 && file.compare(file.size() - 4, 4, ".new") == 0;
+		const auto isHidden = !file.empty() && file.front() == '.';
+		if ( isTemp || isHidden )
+			continue;
+
+		if ( !SSL_CTX_load_verify_locations(ctx, entry.path().c_str(), nullptr) )
+			throw std::runtime_error("could not load certificate: " + entry.path().string());
+	}
+
+}
+
+} // namespace
+
+// where an automatically pinned anchor belongs so the next Connection
+// constructed here loads it: the store that wins the candidate chain, and
+// only when this process can actually write to it — pinning into any other
+// store would never be read. Empty when that store is a single certificate
+// file or not writable (e.g. a root-owned system store). When no store
+// exists at all, the working-directory one is next in line, so pinning
+// there also makes it the winner.
+std::filesystem::path Connection::pinnableTrustStoreDir () {
+	for ( const auto& store : trustStores() ) {
+		std::error_code ec;
+		if ( !std::filesystem::exists(store, ec) )
+			continue;
+		if ( !std::filesystem::is_directory(store, ec) )
+			return {};   // a single certificate file must not be modified
+		if ( !dirWritable(store) )
+			return {};   // not writable — automatic pinning cannot work here
+		return store;
+	}
+
+	if ( dirWritable(".") )
+		return "trusted-certs";
+	return {};
+}
+
+long Connection::lastVerifyResult () const {
+	return _lastVerifyResult;
+}
 
 Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_unique<char[]>(bufferSize)), _bufferSize(bufferSize) {
 	_ctx = SSL_CTX_new(OSSL_QUIC_client_method());
@@ -11,17 +134,38 @@ Connection::Connection ( const unsigned long bufferSize ) : _buffer(std::make_un
 		throw std::runtime_error("Failed to create the SSL_CTX");
 	}
 
-	SSL_CTX_set_default_verify_paths(_ctx);
+	// A throw from the trust-store loading (a broken anchor, a bad
+	// HIKUP_TRUSTED_CERTS) must not leak the context: the destructor does
+	// not run for a failed construction.
+	try {
+		// The OS default trust paths load only without an override:
+		// HIKUP_TRUSTED_CERTS pins trust exclusively, so a publicly trusted
+		// certificate must not verify alongside (or instead of) that store.
+		if ( trustedCertsOverride() == nullptr )
+			SSL_CTX_set_default_verify_paths(_ctx);
 
-	if ( std::filesystem::exists("trusted-certs") )
-		for ( const auto & cert : std::filesystem::directory_iterator("trusted-certs") )
-			if (!SSL_CTX_load_verify_locations(_ctx, cert.path().c_str() , nullptr))
+		for ( const auto& store : trustStores() ) {
+			std::error_code ec;
+			if ( !std::filesystem::exists(store, ec) )
+				continue;
+
+			_trustStoreFromWorkingDir = store == "trusted-certs";
+			loadTrustStore(_ctx, store);
+			break;   // first existing store wins
+		}
+	} catch ( ... ) {
+		SSL_CTX_free(_ctx);
+		_ctx = nullptr;
+		throw;
+	}
 
 	memset(_buffer.get(), '\0', _bufferSize);
 }
 
 void Connection::connectToServer ( std::string ip, const int port, const bool forceServerCertVerify ) {
 	// implementation heavily inspired by https://github.com/openssl/openssl/blob/master/demos/guide/quic-client-block.c#L30
+
+	_lastVerifyResult = X509_V_OK;   // filled in once the handshake ran
 
 	int sock = -1;
 	BIO_ADDRINFO *res;
@@ -128,15 +272,26 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 	SSL_set_verify(_ssl, forceServerCertVerify ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, nullptr);
 
 	if ( forceServerCertVerify ) {
+#if OPENSSL_VERSION_MAJOR > 3
+		/* OpenSSL 4.0 deprecated SSL_set1_host() and split it into IP and DNS
+		 * variants. The peer can be either, so try the IP form first and fall
+		 * back to a DNS name when the address is not an IP literal. */
+		if ( !SSL_set1_ipaddr(_ssl, ip.c_str()) && !SSL_set1_dnsname(_ssl, ip.c_str()) ) {
+			throw std::runtime_error("Failed to set expected hostname for certificate verification");
+		}
+#else
 		if ( !SSL_set1_host(_ssl, ip.c_str()) ) {
 			throw std::runtime_error("Failed to set expected hostname for certificate verification");
 		}
+#endif
 	}
 
 	SSL_set_bio(_ssl, _bio, _bio);
+	_bio = nullptr;   // the SSL owns it from here; close() frees it via SSL_free
 
 	/* Do the handshake with the server */
 	if ( const auto ret = SSL_connect(_ssl); ret < 1) {
+		_lastVerifyResult = SSL_get_verify_result(_ssl);
 		std::string retStr;
 		switch ( const auto err = SSL_get_error(_ssl, ret) ) {
 			case SSL_ERROR_ZERO_RETURN:
@@ -176,10 +331,13 @@ void Connection::connectToServer ( std::string ip, const int port, const bool fo
 		 * If the failure is due to a verification error we can get more
 		 * information about it from SSL_get_verify_result().
 		 */
-		if ( SSL_get_verify_result(_ssl) != X509_V_OK )
-			throw std::runtime_error("Certificate verify error: " + std::string(X509_verify_cert_error_string(SSL_get_verify_result(_ssl))));
+		if ( _lastVerifyResult != X509_V_OK )
+			throw std::runtime_error("Certificate verify error: "
+				+ std::string(X509_verify_cert_error_string(_lastVerifyResult)));
 		throw std::runtime_error("Failed to connect to the server: " + retStr);
 	}
+
+	_lastVerifyResult = SSL_get_verify_result(_ssl);
 }
 
 void Connection::_send ( const char* message, const size_t length ) {
@@ -488,6 +646,51 @@ bool Connection::isConnected () const {
 	return _active;
 }
 
+std::string Connection::peerCertificatePem () const {
+	if ( _ssl == nullptr )
+		return {};
+
+	// the whole presented chain, not just the leaf: the issuers are what
+	// verification needs as trust anchors (on the client side the stack
+	// also contains the peer's own certificate)
+	std::string pem;
+	if ( const auto chain = SSL_get_peer_cert_chain(_ssl); chain != nullptr ) {
+		for ( int i = 0; i < sk_X509_num(chain); ++i ) {
+			const auto bio = BIO_new(BIO_s_mem());
+			PEM_write_bio_X509(bio, sk_X509_value(chain, i));
+
+			char* data = nullptr;
+			const auto len = BIO_get_mem_data(bio, &data);
+			pem.append(data, len);
+
+			BIO_free(bio);
+		}
+	}
+
+	if ( !pem.empty() )
+		return pem;
+
+	// no chain available — fall back to the leaf alone
+	const auto cert = SSL_get1_peer_certificate(_ssl);
+	if ( cert == nullptr )
+		return {};
+
+	const auto bio = BIO_new(BIO_s_mem());
+	PEM_write_bio_X509(bio, cert);
+
+	char* data = nullptr;
+	const auto len = BIO_get_mem_data(bio, &data);
+	std::string leaf(data, len);
+
+	BIO_free(bio);
+	X509_free(cert);
+	return leaf;
+}
+
+bool Connection::trustStoreFromWorkingDir () const {
+	return _trustStoreFromWorkingDir;
+}
+
 void Connection::resizeBuffer ( const unsigned long newSize )  {
 	const unsigned long maxSize = 64 * 1024 * 1024;
 	const unsigned long finalSize = std::min(newSize, maxSize);
@@ -496,8 +699,25 @@ void Connection::resizeBuffer ( const unsigned long newSize )  {
 }
 
 void Connection::close () {
-	SSL_shutdown(_ssl);
-	SSL_CTX_free(_ctx);
+	// Idempotent and safe on a never-connected or partially connected
+	// object: the members start null (and are nulled again here), so a
+	// connectToServer() that threw early can never make this touch a
+	// garbage or already-freed pointer. SSL_free also releases the BIOs
+	// the SSL owns via SSL_set_bio; a BIO created but never handed over
+	// is freed directly.
+	if ( _ssl != nullptr ) {
+		SSL_shutdown(_ssl);
+		SSL_free(_ssl);
+		_ssl = nullptr;
+	}
+	if ( _bio != nullptr ) {
+		BIO_free_all(_bio);
+		_bio = nullptr;
+	}
+	if ( _ctx != nullptr ) {
+		SSL_CTX_free(_ctx);
+		_ctx = nullptr;
+	}
 
 	_active = false;
 }

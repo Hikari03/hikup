@@ -16,6 +16,7 @@ using PKeyPtr   = std::unique_ptr<EVP_PKEY, Deleter<EVP_PKEY, EVP_PKEY_free>>;
 using X509Ptr   = std::unique_ptr<X509, Deleter<X509, X509_free>>;
 using BNPtr     = std::unique_ptr<BIGNUM, Deleter<BIGNUM, BN_free>>;
 using AsnIntPtr = std::unique_ptr<ASN1_INTEGER, Deleter<ASN1_INTEGER, ASN1_INTEGER_free>>;
+using X509NamePtr = std::unique_ptr<X509_NAME, Deleter<X509_NAME, X509_NAME_free>>;
 using BioPtr    = std::unique_ptr<BIO, Deleter<BIO, BIO_free_all>>;
 
 class CertGen {

@@ -28,4 +28,5 @@ namespace CommandHandlers {
 	int listFiles ( Connection& connection, const std::string& user, const std::string& pass, bool quiet = false );
 	int infoFile ( Connection& connection, bool quiet = false );
 	int fetchUrl ( Connection& connection, bool quiet = false );
+	int fetchCert ( Connection& connection, const std::string& host, int port, bool quiet = false );
 }

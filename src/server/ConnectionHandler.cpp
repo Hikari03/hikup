@@ -1,6 +1,7 @@
 #include "ConnectionHandler.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <strings.h>
@@ -10,8 +11,10 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <unistd.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <openssl/x509.h>
 #include <curl/curl.h>
 
 #include "HTTPFileServer.hpp"
@@ -930,10 +933,109 @@ void ConnectionHandler::_syncAsSlave ( ConnectionServer& connection ) {
 	Utils::log("Incoming sync complete");
 }
 
+// verification errors that mean "no trust anchor for this chain" — the
+// only failures a trust-on-first-use pin can fix; anything else (expired
+// certificate, hostname mismatch, network) propagates unchanged
+static bool verifyErrorMeansUnanchored ( const long result ) {
+	return result == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT
+	    || result == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY
+	    || result == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT
+	    || result == X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN
+	    || result == X509_V_ERR_CERT_UNTRUSTED;
+}
+
+// trust-on-first-use for verified sync targets: connect once without
+// verification, pin the certificate the target presents, and let the
+// verified connection that follows validate against it. Returns the pin
+// it wrote, empty when it wrote nothing: an already-pinned target (a
+// changed key must fail the sync, never be replaced), a concurrently
+// created pin, or no writable store.
+std::filesystem::path ConnectionHandler::_pinSyncTargetCert ( const std::string& address, const int port ) {
+	auto name = address;
+	if ( port != 6998 )
+		name += "-" + std::to_string(port);   // same convention as fetch-cert
+
+	const auto store = Connection::pinnableTrustStoreDir();
+	if ( store.empty() ) {
+		Utils::elog("ConnectionHandler::_pinSyncTargetCert: no writable trust store "
+			"directory — pin the certificate for " + name + " manually");
+		return {};
+	}
+
+	const auto target = store / (name + ".pem");
+	std::error_code ec;
+	if ( std::filesystem::exists(target, ec) )
+		return {};   // already pinned; the verified connect is the authority
+
+	Connection probe;
+	probe.connectToServer(address, port, false);
+	const auto pem = probe.peerCertificatePem();
+	// a benign unknown command lets the target close without logging an error
+	try { probe.sendInternal("command:CLOSE"); } catch ( ... ) {}
+
+	if ( pem.empty() ) {
+		Utils::elog("ConnectionHandler::_pinSyncTargetCert: " + name
+			+ " presented no certificate, cannot pin");
+		return {};
+	}
+
+	std::filesystem::create_directories(store, ec);
+	if ( ec ) {
+		Utils::elog("ConnectionHandler::_pinSyncTargetCert: could not create "
+			+ store.string() + ": " + ec.message());
+		return {};
+	}
+
+	// write to a sibling temp file and hard-link it into place — a full disk
+	// must never leave a truncated trust anchor behind, and link() refuses
+	// to replace a pin another process may have created since the check.
+	// The temp name is unique per process: two writers must never
+	// interleave writes to the same temp before the no-replace install.
+	auto tmp = target;
+	tmp += "." + std::to_string(::getpid()) + ".new";
+	{
+		std::ofstream out(tmp, std::ios::trunc);
+		if ( !out ) {
+			Utils::elog("ConnectionHandler::_pinSyncTargetCert: could not write " + tmp.string());
+			return {};
+		}
+		out << pem;
+		out.close();
+		if ( !out ) {
+			std::error_code rm;
+			std::filesystem::remove(tmp, rm);
+			Utils::elog("ConnectionHandler::_pinSyncTargetCert: could not write "
+				+ tmp.string() + " completely");
+			return {};
+		}
+	}
+	if ( ::link(tmp.c_str(), target.c_str()) != 0 ) {
+		std::error_code rm;
+		std::filesystem::remove(tmp, rm);
+		if ( errno == EEXIST ) {
+			// lost the race — the concurrent pin is authoritative, and the
+			// verified connect that follows decides whether it works
+			Utils::log("ConnectionHandler::_pinSyncTargetCert: " + name
+				+ " was pinned concurrently, keeping the existing pin");
+			return {};
+		}
+		Utils::elog("ConnectionHandler::_pinSyncTargetCert: could not install "
+			+ tmp.string() + ": " + std::strerror(errno));
+		return {};
+	}
+	{
+		std::error_code rm;
+		std::filesystem::remove(tmp, rm);
+	}
+
+	Utils::log("ConnectionHandler::_pinSyncTargetCert: pinned the certificate of "
+		+ name + " to " + target.string());
+	return target;
+}
+
 void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 	// send command type and authenticate
 	std::lock_guard lock(_syncMutex);
-	Connection connection;
 
 	std::string address = target.targetAddress;
 	int port = 6998;
@@ -944,7 +1046,42 @@ void ConnectionHandler::_syncAsMaster ( const Settings::SyncTarget& target ) {
 		} catch (...) {}
 	}
 
-	connection.connectToServer(address, port, target.tlsCertVerify);
+	// A verified target connects directly when its CA is already anchored
+	// (e.g. ca_cert.pem in the store). When that fails, trust on first use
+	// applies only to a missing trust anchor — an expired certificate or a
+	// hostname mismatch propagates as-is and is never pinned. An
+	// already-pinned target is never re-pinned, so a changed key fails.
+	// A fresh Connection is built for the retry so it loads the new anchor.
+	std::unique_ptr<Connection> connectionPtr;
+	if ( target.tlsCertVerify ) {
+		auto verified = std::make_unique<Connection>();
+		try {
+			verified->connectToServer(address, port, true);
+		} catch ( const std::exception& ) {
+			if ( !verifyErrorMeansUnanchored(verified->lastVerifyResult()) )
+				throw;   // expiry, name mismatch, network — not fixable by a pin
+
+			const auto pin = _pinSyncTargetCert(address, port);
+			if ( pin.empty() )
+				throw;   // nothing pinned — the original failure stands
+
+			verified = std::make_unique<Connection>();
+			try {
+				verified->connectToServer(address, port, true);
+			} catch ( const std::exception& ) {
+				// pinning did not fix it after all — remove the pin again
+				// or it would wedge every future sync behind a manual delete
+				std::error_code rm;
+				std::filesystem::remove(pin, rm);
+				throw;
+			}
+		}
+		connectionPtr = std::move(verified);
+	} else {
+		connectionPtr = std::make_unique<Connection>();
+		connectionPtr->connectToServer(address, port, false);
+	}
+	Connection& connection = *connectionPtr;
 
 	connection.sendInternal("command:SYNC")
 		.sendInternal("user:" + target.targetUser)

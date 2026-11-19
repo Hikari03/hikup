@@ -35,7 +35,9 @@ std::string ClientInfo::convertConnToString ( const SSL* conn ) {
 #if OPENSSL_VERSION_MAJOR > 3
 	BIO_ADDR *peer = BIO_ADDR_new();
 
-	if (peer && SSL_get_peer_addr(conn, peer) == 1) {
+	if (peer && SSL_get_peer_addr(const_cast<SSL*>(conn), peer) == 1) {
+		// OpenSSL 4.0: the getter only reads from the SSL but still takes a
+		// non-const pointer, so cast away the const on our side.
 		// Extract numeric IP and port (1 = numeric format)
 		char *ip_str = BIO_ADDR_hostname_string(peer, 1);
 		char *port_str = BIO_ADDR_service_string(peer, 1);

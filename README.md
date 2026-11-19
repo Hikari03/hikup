@@ -25,6 +25,7 @@
 - `hikup down <hash> <server-address>[:port] [destination]`: Download a file; `destination` is an optional directory (keeps the server-side name) or file path, defaulting to the current directory.
 - `hikup info <hash> <server-address>[:port]`: Show file metadata (name, size, upload date) without downloading it.
 - `hikup fetch <url> <user> <pass> <server-address>[:port]`: The server itself fetches the URL (http/https, redirects followed) and stores it like an upload; prints the hash and link. Requires the same credentials as `ls`. Shows live progress of the server-side fetch. The stored name is what the remote suggests — the `Content-Disposition` header when present, otherwise the final URL path after redirects. Targets in private address ranges are refused.
+- `hikup fetch-cert <server-address>[:port]`: Download the server's certificate into the trust store (`~/.config/hikup/trusted-certs`) and show its subject, issuer, validity and SHA-256 fingerprint — compare the fingerprint with the server owner out of band, then use the `v`-prefixed commands to verify. Re-running with the same certificate is a no-op; a changed certificate is rejected until the existing pin is deleted. With `v` (`vfetch-cert`) the connection itself is verified against the store first.
 - `hikup rm <hash> <server-address>[:port]`: Remove a file.
 - `hikup ls <user> <pass> <server-address>[:port]`: List all files (requires authentication).
 - add `q` into first argument for quiet run: like qup, qdown, ...
@@ -74,11 +75,13 @@ cmake --build build --target hikup -j $(nproc)
 - Expected name for chain certificate is `server_fullchain.pem` and for private key `server_key.pem`.
 - When no certificate or key is present, server will generate its own CA and certificate.
 - If this happens, the hostname declared in settings will be used. You will also need to add the `ca_cert.pem` as your trusted CA.
+- Client trust anchors are searched in this order, first existing wins: `$HIKUP_TRUSTED_CERTS` (a file or directory), `~/.config/hikup/trusted-certs`, `trusted-certs` under the configured data dir (created by `make install` — `/usr/local/share/hikup/trusted-certs` for the default prefix, `/usr/share/hikup/trusted-certs` with `-DCMAKE_INSTALL_PREFIX=/usr`), and finally `./trusted-certs` — which prints a warning when verifying (`v` commands), since a trust store that depends on the working directory is easy to plant. A certificate that fails to load aborts the connection instead of being silently skipped.
 
 ### Sync
 - Sync files between servers in declared periods.
 - To use this, add target in settings in `[syncTargets]` section.
-- If certificate verify is desired and custom CA certificate was used, place it into `trusted-certs/` directory. 
+- If certificate verify is desired and custom CA certificate was used, place it into `trusted-certs/` directory.
+- Targets with `tlsCertVerify = true` that are not yet anchored are pinned automatically on first contact (trust on first use): the sync connects once unverified, stores the certificate the target presents as `trusted-certs/<host>[-<port>].pem`, then reconnects and verifies against it. Only a missing trust anchor triggers pinning — other verification failures (expired certificate, hostname mismatch) are reported as errors and never pinned, and a pin that turns out not to fix the failure is rolled back. A pinned certificate is never replaced automatically — if the target later presents a different one, the sync fails until the old pin is deleted manually. 
 
 > [!WARNING]
 >**The declared target will be the master in one case**: if you uploaded a removed file and that removal synced. Which means if you again upload this file on non-master, your master will remove it on the next sync.

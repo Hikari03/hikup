@@ -52,7 +52,11 @@ text-decoration:none;cursor:pointer;font-size:13px;transition:all .15s}
 color:#06283d;font-weight:600}
 .btn.primary:hover{filter:brightness(1.12)}
 .btn.ghost{background:transparent;color:var(--steel)}
-.btn.ghost:hover{color:var(--pale)})CSS";
+.btn.ghost:hover{color:var(--pale)}
+@media (max-width:600px){
+body{padding:12px;background-attachment:scroll}
+input{font-size:16px}}
+@media (pointer:coarse){.btn{padding:8px 14px}})CSS";
 
 inline constexpr std::string_view FAVICON =
 	"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E"
@@ -140,7 +144,8 @@ background:linear-gradient(135deg,var(--deep),var(--sky));color:#06283d;font-wei
 transition:filter .15s}
 button[type=submit]:hover{filter:brightness(1.12)}
 .error{margin-top:20px;padding:9px 12px;border-radius:9px;font-size:13px;
-border:1px solid rgba(255,154,168,.35);background:rgba(255,154,168,.09);color:var(--rose)})CSS";
+border:1px solid rgba(255,154,168,.35);background:rgba(255,154,168,.09);color:var(--rose)}
+@media (max-width:480px){main{margin-top:8vh;padding:28px 22px 24px}})CSS";
 
 inline constexpr std::string_view LOGIN_PAGE = R"HTML(<!doctype html>
 <html lang="en">
@@ -179,7 +184,9 @@ background:linear-gradient(135deg,#ff9aa8,#e9f6ff);-webkit-background-clip:text;
 background-clip:text;color:transparent;filter:drop-shadow(0 0 14px rgba(255,154,168,.25))}
 .title{font-size:17px;color:var(--ice)}
 .detail{margin-top:8px;font-size:13px;color:var(--steel)}
-main .btn{margin-top:24px})CSS";
+main .btn{margin-top:24px}
+@media (max-width:480px){main{margin-top:8vh;padding:28px 22px 24px}
+.code{font-size:56px}})CSS";
 
 inline constexpr std::string_view ERROR_PAGE = R"HTML(<!doctype html>
 <html lang="en">
@@ -235,7 +242,22 @@ td.c-date{color:var(--steel);font-variant-numeric:tabular-nums}
 td.c-actions{text-align:right}
 td.c-actions .btn{margin-left:6px}
 tr:hover td{background:rgba(56,189,248,.05)}
-tr.empty td{color:var(--steel);text-align:center;padding:34px 0;font-style:italic})CSS";
+tr.empty td{color:var(--steel);text-align:center;padding:34px 0;font-style:italic}
+@media (max-width:640px){
+main{padding:18px 14px 16px}
+header{gap:10px}
+.toolbar{margin:14px 0 4px}
+#q{width:100%}
+thead{display:none}
+tbody tr{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;
+padding:12px 2px;border-bottom:1px solid var(--line)}
+td{border-bottom:none;padding:0;white-space:normal}
+td.c-name{flex:1 1 100%;max-width:none;overflow:visible;overflow-wrap:anywhere;font-weight:500}
+td.c-size,td.c-date{font-size:12px;text-align:left}
+td.c-actions{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;text-align:left}
+td.c-actions .btn{margin-left:0}
+tr.empty td{flex:1}
+tr:hover td{background:none}})CSS";
 
 inline constexpr std::string_view LISTING_JS = R"JS(<script>
 (function () {

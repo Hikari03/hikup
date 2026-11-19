@@ -2,10 +2,10 @@
 
 _hikup_get_servers() {
     local servers=""
-    if [[ -f /usr/share/hikup ]]; then
-        servers=$(sort -u /usr/share/hikup 2>/dev/null)
-    elif [[ -d /usr/share/hikup ]]; then
-        servers=$(sort -u /usr/share/hikup/* /usr/share/hikup/servers 2>/dev/null)
+    if [[ -f @HIKUP_DATA_DIR@ ]]; then
+        servers=$(sort -u @HIKUP_DATA_DIR@ 2>/dev/null)
+    elif [[ -d @HIKUP_DATA_DIR@ ]]; then
+        servers=$(sort -u @HIKUP_DATA_DIR@/* @HIKUP_DATA_DIR@/servers 2>/dev/null)
     fi
     echo "$servers"
 }
@@ -29,6 +29,7 @@ _hikup() {
         edown qedown vedown qvedown vqedown
         info qinfo vinfo qvinfo vqinfo
         fetch qfetch vfetch qvfetch vqfetch
+        fetch-cert qfetch-cert vfetch-cert qvfetch-cert
         rm qrm vrm qvrm vqrm
         ls qls vls qvls vqls
     )
@@ -68,6 +69,16 @@ _hikup() {
                 COMPREPLY=( $(compgen -W "-" -- "$cur") )
                 return 0
             elif [[ $cword -eq 3 ]]; then
+                local servers
+                servers=$(_hikup_get_servers)
+                COMPREPLY=( $(compgen -W "$servers" -- "$cur") )
+                [[ "$cur" == *:* ]] && declare -F __ltrim_colon_completions >/dev/null 2>&1 && __ltrim_colon_completions "$cur"
+                return 0
+            fi
+            ;;
+        *fetch-cert*)
+            # fetch-cert <server>
+            if [[ $cword -eq 2 ]]; then
                 local servers
                 servers=$(_hikup_get_servers)
                 COMPREPLY=( $(compgen -W "$servers" -- "$cur") )
